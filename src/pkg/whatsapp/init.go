@@ -1,13 +1,14 @@
 package whatsapp
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
 	"sync/atomic"
 	"time"
+
+	"database/sql"
 
 	"github.com/aldinokemal/go-whatsapp-web-multidevice/config"
 	"github.com/aldinokemal/go-whatsapp-web-multidevice/internal/websocket"
@@ -16,13 +17,11 @@ import (
 	"github.com/sirupsen/logrus"
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/appstate"
-	"go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/store"
 	"go.mau.fi/whatsmeow/store/sqlstore"
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
 	waLog "go.mau.fi/whatsmeow/util/log"
-	"google.golang.org/protobuf/proto"
 )
 
 // Type definitions
@@ -43,6 +42,24 @@ type evtMessage struct {
 	RepliedId     string `json:"replied_id,omitempty"`
 	QuotedMessage string `json:"quoted_message,omitempty"`
 }
+
+type WhatsAppTenantUser struct {
+	JID        string `json:"jid"`
+	UserToken  string `json:"token"`
+	WebhookURL string `json:"webhook_url"`
+	ClientId   int64  `json:"client_id"`
+	StatusCode int    `json:"status_code"`
+}
+
+type WhatsAppTenantClient struct {
+	Conn *whatsmeow.Client   // Explicitly named connection
+	User *WhatsAppTenantUser // User data
+}
+
+var WhatsAppDatastore *sqlstore.Container
+var WhatsAppActiveTenantClient = make(map[string]*WhatsAppTenantClient)
+
+var Db *sql.DB
 
 // Global variables
 var (
@@ -68,18 +85,28 @@ func InitWaDB() *sqlstore.Container {
 
 // initDatabase creates and returns a database store container based on the configured URI
 func initDatabase(dbLog waLog.Logger) (*sqlstore.Container, error) {
-	if strings.HasPrefix(config.DBURI, "file:") {
-		return sqlstore.New("sqlite3", config.DBURI, dbLog)
-	} else if strings.HasPrefix(config.DBURI, "postgres:") {
-		return sqlstore.New("postgres", config.DBURI, dbLog)
+	db, err := sql.Open("postgres", config.DBURI)
+	if err != nil {
+		return nil, fmt.Errorf("Error Connect WhatsApp Client Datastore: %w", err)
 	}
 
-	return nil, fmt.Errorf("unknown database type: %s. Currently only sqlite3(file:) and postgres are supported", config.DBURI)
+	container := sqlstore.NewWithDB(db, "postgres", dbLog)
+	WhatsAppDatastore = container
+	Db = db
+
+	err = updateDatabase()
+	if err != nil {
+		return nil, fmt.Errorf("Failed to migrate db tables: %w", err)
+	}
+
+	return container, nil
 }
 
 // InitWaCLI initializes the WhatsApp client
 func InitWaCLI(storeContainer *sqlstore.Container) *whatsmeow.Client {
+
 	device, err := storeContainer.GetFirstDevice()
+
 	if err != nil {
 		log.Errorf("Failed to get device: %v", err)
 		panic(err)
@@ -102,6 +129,37 @@ func InitWaCLI(storeContainer *sqlstore.Container) *whatsmeow.Client {
 	cli.AddEventHandler(handler)
 
 	return cli
+}
+
+func updateDatabase() error {
+	var err error
+
+	_, err = Db.Exec(`
+		CREATE TABLE IF NOT EXISTS whatsmeow_clients (
+		  id SERIAL PRIMARY KEY,
+		  client_name TEXT NOT NULL,
+		  uuid UUID NOT NULL UNIQUE,
+		  secret_key TEXT NOT NULL,
+		  webhook_url TEXT,
+		  status_code INTEGER NOT NULL DEFAULT 1,
+		  updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+		  created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+		);
+		
+		CREATE INDEX IF NOT EXISTS idx_uuid ON whatsmeow_clients (uuid);
+		
+		CREATE TABLE IF NOT EXISTS whatsmeow_device_client_pivot (
+		  id SERIAL PRIMARY KEY,
+		  client_id INTEGER NOT NULL,
+		  jid TEXT,
+		  token TEXT NOT NULL UNIQUE,
+		  updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+		  created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
+		  CONSTRAINT fk_client FOREIGN KEY (client_id) REFERENCES whatsmeow_clients(id) ON DELETE CASCADE
+		);
+	`)
+
+	return err
 }
 
 // handler is the main event handler for WhatsApp events
@@ -232,16 +290,16 @@ func handleImageMessage(evt *events.Message) {
 }
 
 func handleAutoReply(evt *events.Message) {
-	if config.WhatsappAutoReplyMessage != "" &&
-		!isGroupJid(evt.Info.Chat.String()) &&
-		!evt.Info.IsIncomingBroadcast() &&
-		evt.Message.GetExtendedTextMessage().GetText() != "" {
-		_, _ = cli.SendMessage(
-			context.Background(),
-			FormatJID(evt.Info.Sender.String()),
-			&waE2E.Message{Conversation: proto.String(config.WhatsappAutoReplyMessage)},
-		)
-	}
+	// if config.WhatsappAutoReplyMessage != "" &&
+	// 	!isGroupJid(evt.Info.Chat.String()) &&
+	// 	!evt.Info.IsIncomingBroadcast() &&
+	// 	evt.Message.GetExtendedTextMessage().GetText() != "" {
+	// 	_, _ = cli.SendMessage(
+	// 		context.Background(),
+	// 		FormatJID(evt.Info.Sender.String()),
+	// 		&waE2E.Message{Conversation: proto.String(config.WhatsappAutoReplyMessage)},
+	// 	)
+	// }
 }
 
 func handleWebhookForward(evt *events.Message) {
