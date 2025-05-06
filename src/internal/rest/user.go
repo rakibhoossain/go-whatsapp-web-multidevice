@@ -2,6 +2,7 @@ package rest
 
 import (
 	domainUser "github.com/aldinokemal/go-whatsapp-web-multidevice/domains/user"
+	"github.com/aldinokemal/go-whatsapp-web-multidevice/pkg/auth"
 	"github.com/aldinokemal/go-whatsapp-web-multidevice/pkg/utils"
 	"github.com/aldinokemal/go-whatsapp-web-multidevice/pkg/whatsapp"
 	"github.com/gofiber/fiber/v2"
@@ -13,14 +14,14 @@ type User struct {
 
 func InitRestUser(app *fiber.App, service domainUser.IUserService) User {
 	rest := User{Service: service}
-	app.Get("/user/info", rest.UserInfo)
-	app.Get("/user/avatar", rest.UserAvatar)
-	app.Post("/user/avatar", rest.UserChangeAvatar)
-	app.Post("/user/pushname", rest.UserChangePushName)
-	app.Get("/user/my/privacy", rest.UserMyPrivacySetting)
-	app.Get("/user/my/groups", rest.UserMyListGroups)
-	app.Get("/user/my/newsletters", rest.UserMyListNewsletter)
-	app.Get("/user/my/contacts", rest.UserMyListContacts)
+	app.Get("/user/info", auth.BasicAuth(), rest.UserInfo)
+	app.Get("/user/avatar", auth.BasicAuth(), rest.UserAvatar)
+	app.Post("/user/avatar", auth.BasicAuth(), rest.UserChangeAvatar)
+	app.Post("/user/pushname", auth.BasicAuth(), rest.UserChangePushName)
+	app.Get("/user/my/privacy", auth.BasicAuth(), rest.UserMyPrivacySetting)
+	app.Get("/user/my/groups", auth.BasicAuth(), rest.UserMyListGroups)
+	app.Get("/user/my/newsletters", auth.BasicAuth(), rest.UserMyListNewsletter)
+	app.Get("/user/my/contacts", auth.BasicAuth(), rest.UserMyListContacts)
 
 	return rest
 }
@@ -32,7 +33,7 @@ func (controller *User) UserInfo(c *fiber.Ctx) error {
 
 	whatsapp.SanitizePhone(&request.Phone)
 
-	response, err := controller.Service.Info(c.UserContext(), request)
+	response, err := controller.Service.Info(c, request)
 	utils.PanicIfNeeded(err)
 
 	return c.JSON(utils.ResponseData{
@@ -50,7 +51,7 @@ func (controller *User) UserAvatar(c *fiber.Ctx) error {
 
 	whatsapp.SanitizePhone(&request.Phone)
 
-	response, err := controller.Service.Avatar(c.UserContext(), request)
+	response, err := controller.Service.Avatar(c, request)
 	utils.PanicIfNeeded(err)
 
 	return c.JSON(utils.ResponseData{
@@ -69,7 +70,7 @@ func (controller *User) UserChangeAvatar(c *fiber.Ctx) error {
 	request.Avatar, err = c.FormFile("avatar")
 	utils.PanicIfNeeded(err)
 
-	err = controller.Service.ChangeAvatar(c.UserContext(), request)
+	err = controller.Service.ChangeAvatar(c, request)
 	utils.PanicIfNeeded(err)
 
 	return c.JSON(utils.ResponseData{
@@ -80,7 +81,7 @@ func (controller *User) UserChangeAvatar(c *fiber.Ctx) error {
 }
 
 func (controller *User) UserMyPrivacySetting(c *fiber.Ctx) error {
-	response, err := controller.Service.MyPrivacySetting(c.UserContext())
+	response, err := controller.Service.MyPrivacySetting(c)
 	utils.PanicIfNeeded(err)
 
 	return c.JSON(utils.ResponseData{
@@ -92,7 +93,7 @@ func (controller *User) UserMyPrivacySetting(c *fiber.Ctx) error {
 }
 
 func (controller *User) UserMyListGroups(c *fiber.Ctx) error {
-	response, err := controller.Service.MyListGroups(c.UserContext())
+	response, err := controller.Service.MyListGroups(c)
 	utils.PanicIfNeeded(err)
 
 	return c.JSON(utils.ResponseData{
@@ -104,7 +105,7 @@ func (controller *User) UserMyListGroups(c *fiber.Ctx) error {
 }
 
 func (controller *User) UserMyListNewsletter(c *fiber.Ctx) error {
-	response, err := controller.Service.MyListNewsletter(c.UserContext())
+	response, err := controller.Service.MyListNewsletter(c)
 	utils.PanicIfNeeded(err)
 
 	return c.JSON(utils.ResponseData{
@@ -116,7 +117,7 @@ func (controller *User) UserMyListNewsletter(c *fiber.Ctx) error {
 }
 
 func (controller *User) UserMyListContacts(c *fiber.Ctx) error {
-	response, err := controller.Service.MyListContacts(c.UserContext())
+	response, err := controller.Service.MyListContacts(c)
 	utils.PanicIfNeeded(err)
 
 	return c.JSON(utils.ResponseData{
@@ -132,7 +133,7 @@ func (controller *User) UserChangePushName(c *fiber.Ctx) error {
 	err := c.BodyParser(&request)
 	utils.PanicIfNeeded(err)
 
-	err = controller.Service.ChangePushName(c.UserContext(), request)
+	err = controller.Service.ChangePushName(c, request)
 	utils.PanicIfNeeded(err)
 
 	return c.JSON(utils.ResponseData{

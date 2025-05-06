@@ -1,14 +1,16 @@
 package message
 
-import "context"
+import (
+	"github.com/gofiber/fiber/v2"
+)
 
 type IMessageService interface {
-	MarkAsRead(ctx context.Context, request MarkAsReadRequest) (response GenericResponse, err error)
-	ReactMessage(ctx context.Context, request ReactionRequest) (response GenericResponse, err error)
-	RevokeMessage(ctx context.Context, request RevokeRequest) (response GenericResponse, err error)
-	UpdateMessage(ctx context.Context, request UpdateMessageRequest) (response GenericResponse, err error)
-	DeleteMessage(ctx context.Context, request DeleteRequest) (err error)
-	StarMessage(ctx context.Context, request StarRequest) (err error)
+	MarkAsRead(c *fiber.Ctx, request MarkAsReadRequest) (response GenericResponse, err error)
+	ReactMessage(c *fiber.Ctx, request ReactionRequest) (response GenericResponse, err error)
+	RevokeMessage(c *fiber.Ctx, request RevokeRequest) (response GenericResponse, err error)
+	UpdateMessage(c *fiber.Ctx, request UpdateMessageRequest) (response GenericResponse, err error)
+	DeleteMessage(c *fiber.Ctx, request DeleteRequest) (err error)
+	StarMessage(c *fiber.Ctx, request StarRequest) (err error)
 }
 
 type GenericResponse struct {

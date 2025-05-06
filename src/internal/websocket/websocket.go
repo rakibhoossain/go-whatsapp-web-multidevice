@@ -1,7 +1,7 @@
 package websocket
 
 import (
-	"context"
+	// "context"
 	"encoding/json"
 	"log"
 
@@ -108,14 +108,14 @@ func RegisterRoutes(app *fiber.App, service domainApp.IAppService) {
 					return
 				}
 
-				if messageData.Code == "FETCH_DEVICES" {
-					devices, _ := service.FetchDevices(context.Background())
-					Broadcast <- BroadcastMessage{
-						Code:    "LIST_DEVICES",
-						Message: "Device found",
-						Result:  devices,
-					}
-				}
+				// if messageData.Code == "FETCH_DEVICES" {
+				// 	devices, _ := service.FetchDevices(context.Background())
+				// 	Broadcast <- BroadcastMessage{
+				// 		Code:    "LIST_DEVICES",
+				// 		Message: "Device found",
+				// 		Result:  devices,
+				// 	}
+				// }
 			} else {
 				log.Println("unsupported message type:", messageType)
 			}

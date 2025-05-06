@@ -4,12 +4,14 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"mime"
 	"os"
 	"regexp"
 	"strings"
 	"time"
+	"runtime"
 
 	"github.com/google/uuid"
 	"github.com/sirupsen/logrus"
@@ -20,6 +22,7 @@ import (
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
+	"go.mau.fi/whatsmeow/proto/waCompanionReg"
 )
 
 // ExtractMedia is a helper function to extract media from whatsapp
@@ -372,4 +375,146 @@ func ExtractMessageText(evt *events.Message) string {
 		}
 	}
 	return messageText
+}
+
+func WhatsAppGetJID(user *WhatsAppTenantUser, id string) types.JID {
+	if WhatsAppActiveTenantClient[user.UserToken] != nil {
+		var ids []string
+
+		ids = append(ids, "+"+id)
+		infos, err := WhatsAppActiveTenantClient[user.UserToken].Conn.IsOnWhatsApp(ids)
+		if err == nil {
+			// If WhatsApp ID is Registered Then
+			// Return ID Information
+			if infos[0].IsIn {
+				return infos[0].JID
+			}
+		}
+	}
+
+	// Return Empty ID Information
+	return types.EmptyJID
+}
+
+func WhatsAppCheckJID(user *WhatsAppTenantUser, id string) (types.JID, error) {
+	if WhatsAppActiveTenantClient[user.UserToken] != nil {
+		// Compose New Remote JID
+		remoteJID := WhatsAppComposeJID(id)
+		if remoteJID.Server != types.GroupServer {
+			// Validate JID if Remote JID is not Group JID
+			if WhatsAppGetJID(user, remoteJID.String()).IsEmpty() {
+				return types.EmptyJID, errors.New("WhatsApp Personal ID is Not Registered")
+			}
+		}
+
+		// Return Remote ID Information
+		return remoteJID, nil
+	}
+
+	// Return Empty ID Information
+	return types.EmptyJID, nil
+}
+
+func WhatsAppComposeJID(id string) types.JID {
+	// Decompose WhatsApp ID First Before Recomposing
+	id = WhatsAppDecomposeJID(id)
+
+	// Check if ID is Group or Not By Detecting '-' for Old Group ID
+	// Or By ID Length That Should be 18 Digits or More
+	if strings.ContainsRune(id, '-') || len(id) >= 18 {
+		// Return New Group User JID
+		return types.NewJID(id, types.GroupServer)
+	}
+
+	// Return New Standard User JID
+	return types.NewJID(id, types.DefaultUserServer)
+}
+
+func WhatsAppDecomposeJID(id string) string {
+	// Check if WhatsApp ID Contains '@' Symbol
+	if strings.ContainsRune(id, '@') {
+		// Split WhatsApp ID Based on '@' Symbol
+		// and Get Only The First Section Before The Symbol
+		buffers := strings.Split(id, "@")
+		id = buffers[0]
+	}
+
+	// Check if WhatsApp ID First Character is '+' Symbol
+	if id[0] == '+' {
+		// Remove '+' Symbol from WhatsApp ID
+		id = id[1:]
+	}
+
+	return id
+}
+
+func GetWhatsappTenantClient(clients *map[string]*WhatsAppTenantClient, user *WhatsAppTenantUser) (*WhatsAppTenantClient, error) {
+	wacli := (*clients)[user.UserToken]
+	if wacli == nil || wacli.Conn == nil {
+		return nil, errors.New("WhatsApp Client is not active")
+	}
+
+	return wacli, nil
+
+	// if wacli := (*clients)[user.UserToken]; wacli != nil && wacli.Conn != nil {
+	// 	return wacli, nil
+	// }
+
+	// return nil, errors.New("WhatsApp Client is not active")
+}
+
+
+
+func WhatsAppGetUserAgent(agentType string) waCompanionReg.DeviceProps_PlatformType {
+	switch strings.ToLower(agentType) {
+	case "desktop":
+		return waCompanionReg.DeviceProps_DESKTOP
+	case "mac":
+		return waCompanionReg.DeviceProps_CATALINA
+	case "android":
+		return waCompanionReg.DeviceProps_ANDROID_AMBIGUOUS
+	case "android-phone":
+		return waCompanionReg.DeviceProps_ANDROID_PHONE
+	case "andorid-tablet":
+		return waCompanionReg.DeviceProps_ANDROID_TABLET
+	case "ios-phone":
+		return waCompanionReg.DeviceProps_IOS_PHONE
+	case "ios-catalyst":
+		return waCompanionReg.DeviceProps_IOS_CATALYST
+	case "ipad":
+		return waCompanionReg.DeviceProps_IPAD
+	case "wearos":
+		return waCompanionReg.DeviceProps_WEAR_OS
+	case "ie":
+		return waCompanionReg.DeviceProps_IE
+	case "edge":
+		return waCompanionReg.DeviceProps_EDGE
+	case "chrome":
+		return waCompanionReg.DeviceProps_CHROME
+	case "safari":
+		return waCompanionReg.DeviceProps_SAFARI
+	case "firefox":
+		return waCompanionReg.DeviceProps_FIREFOX
+	case "opera":
+		return waCompanionReg.DeviceProps_OPERA
+	case "uwp":
+		return waCompanionReg.DeviceProps_UWP
+	case "aloha":
+		return waCompanionReg.DeviceProps_ALOHA
+	case "tv-tcl":
+		return waCompanionReg.DeviceProps_TCL_TV
+	default:
+		return waCompanionReg.DeviceProps_UNKNOWN
+	}
+}
+
+func WhatsAppGetUserOS() string {
+	switch runtime.GOOS {
+	case "windows":
+		return "Windows"
+	case "darwin":
+		return "macOS"
+	default:
+		return "Linux"
+	}
 }

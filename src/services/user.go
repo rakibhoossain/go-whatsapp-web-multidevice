@@ -2,45 +2,59 @@ package services
 
 import (
 	"bytes"
-	"context"
 	"errors"
 	"fmt"
 	"image"
 	"time"
 
 	domainUser "github.com/aldinokemal/go-whatsapp-web-multidevice/domains/user"
+	"github.com/aldinokemal/go-whatsapp-web-multidevice/pkg/auth"
 	pkgError "github.com/aldinokemal/go-whatsapp-web-multidevice/pkg/error"
 	"github.com/aldinokemal/go-whatsapp-web-multidevice/pkg/whatsapp"
 	"github.com/aldinokemal/go-whatsapp-web-multidevice/validations"
 	"github.com/disintegration/imaging"
+	"github.com/gofiber/fiber/v2"
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/appstate"
 	"go.mau.fi/whatsmeow/types"
 )
 
 type userService struct {
-	WaCli *whatsmeow.Client
+	Clients *map[string]*whatsapp.WhatsAppTenantClient
 }
 
-func NewUserService(waCli *whatsmeow.Client) domainUser.IUserService {
+func NewUserService(clients *map[string]*whatsapp.WhatsAppTenantClient) domainUser.IUserService {
 	return &userService{
-		WaCli: waCli,
+		Clients: clients,
 	}
 }
 
-func (service userService) Info(ctx context.Context, request domainUser.InfoRequest) (response domainUser.InfoResponse, err error) {
-	err = validations.ValidateUserInfo(ctx, request)
+func (service userService) Info(c *fiber.Ctx, request domainUser.InfoRequest) (response domainUser.InfoResponse, err error) {
+	
+	
+	authPayload, err := auth.AuthPayload(c)
+	if err != nil {
+		return response, err
+	}
+
+	tenantClient, err := whatsapp.GetWhatsappTenantClient(service.Clients, authPayload.User)
+	if err != nil {
+		return response, err
+	}
+	
+	
+	err = validations.ValidateUserInfo(c.UserContext(), request)
 	if err != nil {
 		return response, err
 	}
 	var jids []types.JID
-	dataWaRecipient, err := whatsapp.ValidateJidWithLogin(service.WaCli, request.Phone)
+	dataWaRecipient, err := whatsapp.ValidateJidWithLogin(tenantClient.Conn, request.Phone)
 	if err != nil {
 		return response, err
 	}
 
 	jids = append(jids, dataWaRecipient)
-	resp, err := service.WaCli.GetUserInfo(jids)
+	resp, err := tenantClient.Conn.GetUserInfo(jids)
 	if err != nil {
 		return response, err
 	}
@@ -71,22 +85,33 @@ func (service userService) Info(ctx context.Context, request domainUser.InfoRequ
 	return response, nil
 }
 
-func (service userService) Avatar(ctx context.Context, request domainUser.AvatarRequest) (response domainUser.AvatarResponse, err error) {
+func (service userService) Avatar(c *fiber.Ctx, request domainUser.AvatarRequest) (response domainUser.AvatarResponse, err error) {
+
+	authPayload, err := auth.AuthPayload(c)
+	if err != nil {
+		return response, err
+	}
+
+	tenantClient, err := whatsapp.GetWhatsappTenantClient(service.Clients, authPayload.User)
+	if err != nil {
+		return response, err
+	}
+
 
 	chanResp := make(chan domainUser.AvatarResponse)
 	chanErr := make(chan error)
 	waktu := time.Now()
 
 	go func() {
-		err = validations.ValidateUserAvatar(ctx, request)
+		err = validations.ValidateUserAvatar(c.UserContext(), request)
 		if err != nil {
 			chanErr <- err
 		}
-		dataWaRecipient, err := whatsapp.ValidateJidWithLogin(service.WaCli, request.Phone)
+		dataWaRecipient, err := whatsapp.ValidateJidWithLogin(tenantClient.Conn, request.Phone)
 		if err != nil {
 			chanErr <- err
 		}
-		pic, err := service.WaCli.GetProfilePictureInfo(dataWaRecipient, &whatsmeow.GetProfilePictureParams{
+		pic, err := tenantClient.Conn.GetProfilePictureInfo(dataWaRecipient, &whatsmeow.GetProfilePictureParams{
 			Preview:     request.IsPreview,
 			IsCommunity: request.IsCommunity,
 		})
@@ -118,10 +143,22 @@ func (service userService) Avatar(ctx context.Context, request domainUser.Avatar
 
 }
 
-func (service userService) MyListGroups(_ context.Context) (response domainUser.MyListGroupsResponse, err error) {
-	whatsapp.MustLogin(service.WaCli)
+func (service userService) MyListGroups(c *fiber.Ctx) (response domainUser.MyListGroupsResponse, err error) {
+	
+	authPayload, err := auth.AuthPayload(c)
+	if err != nil {
+		return response, err
+	}
 
-	groups, err := service.WaCli.GetJoinedGroups()
+	tenantClient, err := whatsapp.GetWhatsappTenantClient(service.Clients, authPayload.User)
+	if err != nil {
+		return response, err
+	}
+	
+	
+	whatsapp.MustLogin(tenantClient.Conn)
+
+	groups, err := tenantClient.Conn.GetJoinedGroups()
 	if err != nil {
 		return
 	}
@@ -132,10 +169,22 @@ func (service userService) MyListGroups(_ context.Context) (response domainUser.
 	return response, nil
 }
 
-func (service userService) MyListNewsletter(_ context.Context) (response domainUser.MyListNewsletterResponse, err error) {
-	whatsapp.MustLogin(service.WaCli)
+func (service userService) MyListNewsletter(c *fiber.Ctx) (response domainUser.MyListNewsletterResponse, err error) {
+	
+	authPayload, err := auth.AuthPayload(c)
+	if err != nil {
+		return response, err
+	}
 
-	datas, err := service.WaCli.GetSubscribedNewsletters()
+	tenantClient, err := whatsapp.GetWhatsappTenantClient(service.Clients, authPayload.User)
+	if err != nil {
+		return response, err
+	}
+	
+	
+	whatsapp.MustLogin(tenantClient.Conn)
+
+	datas, err := tenantClient.Conn.GetSubscribedNewsletters()
 	if err != nil {
 		return
 	}
@@ -146,10 +195,22 @@ func (service userService) MyListNewsletter(_ context.Context) (response domainU
 	return response, nil
 }
 
-func (service userService) MyPrivacySetting(_ context.Context) (response domainUser.MyPrivacySettingResponse, err error) {
-	whatsapp.MustLogin(service.WaCli)
+func (service userService) MyPrivacySetting(c *fiber.Ctx) (response domainUser.MyPrivacySettingResponse, err error) {
+	
+	
+	authPayload, err := auth.AuthPayload(c)
+	if err != nil {
+		return response, err
+	}
 
-	resp, err := service.WaCli.TryFetchPrivacySettings(true)
+	tenantClient, err := whatsapp.GetWhatsappTenantClient(service.Clients, authPayload.User)
+	if err != nil {
+		return response, err
+	}
+	
+	whatsapp.MustLogin(tenantClient.Conn)
+
+	resp, err := tenantClient.Conn.TryFetchPrivacySettings(true)
 	if err != nil {
 		return
 	}
@@ -161,10 +222,23 @@ func (service userService) MyPrivacySetting(_ context.Context) (response domainU
 	return response, nil
 }
 
-func (service userService) MyListContacts(ctx context.Context) (response domainUser.MyListContactsResponse, err error) {
-	whatsapp.MustLogin(service.WaCli)
+func (service userService) MyListContacts(c *fiber.Ctx) (response domainUser.MyListContactsResponse, err error) {
+	
+	
+	authPayload, err := auth.AuthPayload(c)
+	if err != nil {
+		return response, err
+	}
 
-	contacts, err := service.WaCli.Store.Contacts.GetAllContacts()
+	tenantClient, err := whatsapp.GetWhatsappTenantClient(service.Clients, authPayload.User)
+	if err != nil {
+		return response, err
+	}
+	
+	
+	whatsapp.MustLogin(tenantClient.Conn)
+
+	contacts, err := tenantClient.Conn.Store.Contacts.GetAllContacts()
 	if err != nil {
 		return
 	}
@@ -179,8 +253,21 @@ func (service userService) MyListContacts(ctx context.Context) (response domainU
 	return response, nil
 }
 
-func (service userService) ChangeAvatar(ctx context.Context, request domainUser.ChangeAvatarRequest) (err error) {
-	whatsapp.MustLogin(service.WaCli)
+func (service userService) ChangeAvatar(c *fiber.Ctx, request domainUser.ChangeAvatarRequest) (err error) {
+	
+	
+	authPayload, err := auth.AuthPayload(c)
+	if err != nil {
+		return err
+	}
+
+	tenantClient, err := whatsapp.GetWhatsappTenantClient(service.Clients, authPayload.User)
+	if err != nil {
+		return err
+	}
+	
+	
+	whatsapp.MustLogin(tenantClient.Conn)
 
 	file, err := request.Avatar.Open()
 	if err != nil {
@@ -225,7 +312,7 @@ func (service userService) ChangeAvatar(ctx context.Context, request domainUser.
 		return fmt.Errorf("failed to encode image: %v", err)
 	}
 
-	_, err = service.WaCli.SetGroupPhoto(types.JID{}, buf.Bytes())
+	_, err = tenantClient.Conn.SetGroupPhoto(types.JID{}, buf.Bytes())
 	if err != nil {
 		return err
 	}
@@ -233,10 +320,22 @@ func (service userService) ChangeAvatar(ctx context.Context, request domainUser.
 	return nil
 }
 
-func (service userService) ChangePushName(ctx context.Context, request domainUser.ChangePushNameRequest) (err error) {
-	whatsapp.MustLogin(service.WaCli)
+func (service userService) ChangePushName(c *fiber.Ctx, request domainUser.ChangePushNameRequest) (err error) {
+	
+	authPayload, err := auth.AuthPayload(c)
+	if err != nil {
+		return err
+	}
 
-	err = service.WaCli.SendAppState(appstate.BuildSettingPushName(request.PushName))
+	tenantClient, err := whatsapp.GetWhatsappTenantClient(service.Clients, authPayload.User)
+	if err != nil {
+		return err
+	}
+	
+	
+	whatsapp.MustLogin(tenantClient.Conn)
+
+	err = tenantClient.Conn.SendAppState(appstate.BuildSettingPushName(request.PushName))
 	if err != nil {
 		return err
 	}

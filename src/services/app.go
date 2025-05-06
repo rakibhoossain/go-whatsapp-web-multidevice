@@ -1,177 +1,147 @@
 package services
 
 import (
-	"context"
-	"errors"
-	"fmt"
-	"os"
-	"path/filepath"
-	"strings"
-	"time"
-
-	"github.com/aldinokemal/go-whatsapp-web-multidevice/config"
 	domainApp "github.com/aldinokemal/go-whatsapp-web-multidevice/domains/app"
+	"github.com/aldinokemal/go-whatsapp-web-multidevice/pkg/auth"
 	pkgError "github.com/aldinokemal/go-whatsapp-web-multidevice/pkg/error"
+	"github.com/aldinokemal/go-whatsapp-web-multidevice/pkg/whatsapp"
 	"github.com/aldinokemal/go-whatsapp-web-multidevice/validations"
-	fiberUtils "github.com/gofiber/fiber/v2/utils"
+	"github.com/gofiber/fiber/v2"
 	"github.com/sirupsen/logrus"
-	"github.com/skip2/go-qrcode"
-	"go.mau.fi/libsignal/logger"
-	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/store/sqlstore"
 )
 
 type serviceApp struct {
-	WaCli *whatsmeow.Client
-	db    *sqlstore.Container
+	Clients *map[string]*whatsapp.WhatsAppTenantClient
+	db      *sqlstore.Container
 }
 
-func NewAppService(waCli *whatsmeow.Client, db *sqlstore.Container) domainApp.IAppService {
+func NewAppService(clients *map[string]*whatsapp.WhatsAppTenantClient, db *sqlstore.Container) domainApp.IAppService {
 	return &serviceApp{
-		WaCli: waCli,
-		db:    db,
+		Clients: clients,
+		db:      db,
 	}
 }
 
-func (service serviceApp) Login(_ context.Context) (response domainApp.LoginResponse, err error) {
-	if service.WaCli == nil {
-		return response, pkgError.ErrWaCLI
-	}
-
-	// Disconnect for reconnecting
-	service.WaCli.Disconnect()
-
-	chImage := make(chan string)
-
-	ch, err := service.WaCli.GetQRChannel(context.Background())
+func (service serviceApp) Login(c *fiber.Ctx) (response domainApp.LoginResponse, err error) {
+	authPayload, err := auth.AuthPayload(c)
 	if err != nil {
-		logrus.Error(err.Error())
-		// This error means that we're already logged in, so ignore it.
-		if errors.Is(err, whatsmeow.ErrQRStoreContainsID) {
-			_ = service.WaCli.Connect() // just connect to websocket
-			if service.WaCli.IsLoggedIn() {
-				return response, pkgError.ErrAlreadyLoggedIn
-			}
-			return response, pkgError.ErrSessionSaved
-		} else {
-			return response, pkgError.ErrQrChannel
-		}
-	} else {
-		go func() {
-			for evt := range ch {
-				response.Code = evt.Code
-				response.Duration = evt.Timeout / time.Second / 2
-				if evt.Event == "code" {
-					qrPath := fmt.Sprintf("%s/scan-qr-%s.png", config.PathQrCode, fiberUtils.UUIDv4())
-					err = qrcode.WriteFile(evt.Code, qrcode.Medium, 512, qrPath)
-					if err != nil {
-						logrus.Error("Error when write qr code to file: ", err)
-					}
-					go func() {
-						time.Sleep(response.Duration * time.Second)
-						err := os.Remove(qrPath)
-						if err != nil {
-							logrus.Error("error when remove qrImage file", err.Error())
-						}
-					}()
-					chImage <- qrPath
-				} else {
-					logrus.Error("error when get qrCode", evt.Event)
-				}
-			}
-		}()
+		return response, err
 	}
 
-	err = service.WaCli.Connect()
+	// Initialize WhatsApp Client
+	whatsapp.WhatsAppInitClient(nil, authPayload.User)
+
+	// Get WhatsApp QR Code Image
+	qrCodeImage, qrCodeTimeout, err := whatsapp.WhatsAppLogin(authPayload.User)
 	if err != nil {
-		logger.Error("Error when connect to whatsapp", err)
-		return response, pkgError.ErrReconnect
+		return response, err
 	}
-	response.ImagePath = <-chImage
+
+	// If Return is Not QR Code But Reconnected
+	if qrCodeImage == "WhatsApp Client is Reconnected" {
+		return response, pkgError.ErrAlreadyLoggedIn
+	}
+
+	response.Code = qrCodeImage
+	response.Duration = qrCodeTimeout
 
 	return response, nil
 }
 
-func (service serviceApp) LoginWithCode(ctx context.Context, phoneNumber string) (loginCode string, err error) {
-	if err = validations.ValidateLoginWithCode(ctx, phoneNumber); err != nil {
+func (service serviceApp) LoginWithCode(c *fiber.Ctx, phoneNumber string) (loginCode string, err error) {
+	authPayload, err := auth.AuthPayload(c)
+	if err != nil {
+		return loginCode, err
+	}
+
+	if err = validations.ValidateLoginWithCode(c.UserContext(), phoneNumber); err != nil {
 		logrus.Errorf("Error when validate login with code: %s", err.Error())
 		return loginCode, err
 	}
 
-	// detect is already logged in
-	if service.WaCli.Store.ID != nil {
-		logrus.Warn("User is already logged in")
-		return loginCode, pkgError.ErrAlreadyLoggedIn
-	}
+	// Initialize WhatsApp Client
+	whatsapp.WhatsAppInitClient(nil, authPayload.User)
 
-	// reconnect first
-	_ = service.Reconnect(ctx)
-
-	loginCode, err = service.WaCli.PairPhone(phoneNumber, true, whatsmeow.PairClientChrome, "Chrome (Linux)")
+	// Get WhatsApp pairing Code text
+	pairCode, err := whatsapp.WhatsAppLoginPair(authPayload.User)
 	if err != nil {
-		logrus.Errorf("Error when pairing phone: %s", err.Error())
 		return loginCode, err
 	}
 
-	logrus.Infof("Successfully paired phone with code: %s", loginCode)
+	// If Return is not pairing code but Reconnected
+	// Then Return OK With Reconnected Status
+	if pairCode == "WhatsApp Client is Reconnected" {
+		return pairCode, nil
+	}
+
 	return loginCode, nil
 }
 
-func (service serviceApp) Logout(_ context.Context) (err error) {
+func (service serviceApp) Logout(c *fiber.Ctx) (err error) {
+
+	authPayload, err := auth.AuthPayload(c)
+	if err != nil {
+		return err
+	}
+
+	err = whatsapp.WhatsAppLogout(authPayload.User)
+	return
+
 	// delete history
-	files, err := filepath.Glob(fmt.Sprintf("./%s/history-*", config.PathStorages))
-	if err != nil {
-		return err
-	}
+	// files, err := filepath.Glob(fmt.Sprintf("./%s/history-*", config.PathStorages))
+	// if err != nil {
+	// 	return err
+	// }
 
-	for _, f := range files {
-		err = os.Remove(f)
-		if err != nil {
-			return err
-		}
-	}
-	// delete qr images
-	qrImages, err := filepath.Glob(fmt.Sprintf("./%s/scan-*", config.PathQrCode))
-	if err != nil {
-		return err
-	}
+	// for _, f := range files {
+	// 	err = os.Remove(f)
+	// 	if err != nil {
+	// 		return err
+	// 	}
+	// }
+	// // delete qr images
+	// qrImages, err := filepath.Glob(fmt.Sprintf("./%s/scan-*", config.PathQrCode))
+	// if err != nil {
+	// 	return err
+	// }
 
-	for _, f := range qrImages {
-		err = os.Remove(f)
-		if err != nil {
-			return err
-		}
-	}
+	// for _, f := range qrImages {
+	// 	err = os.Remove(f)
+	// 	if err != nil {
+	// 		return err
+	// 	}
+	// }
 
 	// delete senditems
-	qrItems, err := filepath.Glob(fmt.Sprintf("./%s/*", config.PathSendItems))
+	// qrItems, err := filepath.Glob(fmt.Sprintf("./%s/*", config.PathSendItems))
+	// if err != nil {
+	// 	return err
+	// }
+
+	// for _, f := range qrItems {
+	// 	if !strings.Contains(f, ".gitignore") {
+	// 		err = os.Remove(f)
+	// 		if err != nil {
+	// 			return err
+	// 		}
+	// 	}
+	// }
+
+	// err = service.WaCli.Logout()
+	// return
+}
+
+func (service serviceApp) Reconnect(c *fiber.Ctx) (err error) {
+	authPayload, err := auth.AuthPayload(c)
 	if err != nil {
 		return err
 	}
 
-	for _, f := range qrItems {
-		if !strings.Contains(f, ".gitignore") {
-			err = os.Remove(f)
-			if err != nil {
-				return err
-			}
-		}
-	}
-
-	err = service.WaCli.Logout()
-	return
+	return whatsapp.WhatsAppReconnect(authPayload.User)
 }
 
-func (service serviceApp) Reconnect(_ context.Context) (err error) {
-	service.WaCli.Disconnect()
-	return service.WaCli.Connect()
-}
-
-func (service serviceApp) FirstDevice(ctx context.Context) (response domainApp.DevicesResponse, err error) {
-	if service.WaCli == nil {
-		return response, pkgError.ErrWaCLI
-	}
-
+func (service serviceApp) FirstDevice(c *fiber.Ctx) (response domainApp.DevicesResponse, err error) {
 	devices, err := service.db.GetFirstDevice()
 	if err != nil {
 		return response, err
@@ -187,11 +157,7 @@ func (service serviceApp) FirstDevice(ctx context.Context) (response domainApp.D
 	return response, nil
 }
 
-func (service serviceApp) FetchDevices(_ context.Context) (response []domainApp.DevicesResponse, err error) {
-	if service.WaCli == nil {
-		return response, pkgError.ErrWaCLI
-	}
-
+func (service serviceApp) FetchDevices(_ *fiber.Ctx) (response []domainApp.DevicesResponse, err error) {
 	devices, err := service.db.GetAllDevices()
 	if err != nil {
 		return nil, err

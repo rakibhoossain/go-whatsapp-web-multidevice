@@ -8,6 +8,7 @@ import (
 	"github.com/aldinokemal/go-whatsapp-web-multidevice/pkg/whatsapp"
 	"github.com/gofiber/fiber/v2"
 	"go.mau.fi/whatsmeow"
+	"github.com/aldinokemal/go-whatsapp-web-multidevice/pkg/auth"
 )
 
 type Group struct {
@@ -16,16 +17,16 @@ type Group struct {
 
 func InitRestGroup(app *fiber.App, service domainGroup.IGroupService) Group {
 	rest := Group{Service: service}
-	app.Post("/group", rest.CreateGroup)
-	app.Post("/group/join-with-link", rest.JoinGroupWithLink)
-	app.Post("/group/leave", rest.LeaveGroup)
-	app.Post("/group/participants", rest.AddParticipants)
-	app.Post("/group/participants/remove", rest.DeleteParticipants)
-	app.Post("/group/participants/promote", rest.PromoteParticipants)
-	app.Post("/group/participants/demote", rest.DemoteParticipants)
-	app.Get("/group/participant-requests", rest.ListParticipantRequests)
-	app.Post("/group/participant-requests/approve", rest.ApproveParticipantRequests)
-	app.Post("/group/participant-requests/reject", rest.RejectParticipantRequests)
+	app.Post("/group", auth.BasicAuth(), rest.CreateGroup)
+	app.Post("/group/join-with-link", auth.BasicAuth(), rest.JoinGroupWithLink)
+	app.Post("/group/leave", auth.BasicAuth(), rest.LeaveGroup)
+	app.Post("/group/participants", auth.BasicAuth(), rest.AddParticipants)
+	app.Post("/group/participants/remove", auth.BasicAuth(), rest.DeleteParticipants)
+	app.Post("/group/participants/promote", auth.BasicAuth(), rest.PromoteParticipants)
+	app.Post("/group/participants/demote", auth.BasicAuth(), rest.DemoteParticipants)
+	app.Get("/group/participant-requests", auth.BasicAuth(), rest.ListParticipantRequests)
+	app.Post("/group/participant-requests/approve", auth.BasicAuth(), rest.ApproveParticipantRequests)
+	app.Post("/group/participant-requests/reject", auth.BasicAuth(), rest.RejectParticipantRequests)
 	return rest
 }
 
@@ -34,7 +35,7 @@ func (controller *Group) JoinGroupWithLink(c *fiber.Ctx) error {
 	err := c.BodyParser(&request)
 	utils.PanicIfNeeded(err)
 
-	response, err := controller.Service.JoinGroupWithLink(c.UserContext(), request)
+	response, err := controller.Service.JoinGroupWithLink(c, request)
 	utils.PanicIfNeeded(err)
 
 	return c.JSON(utils.ResponseData{
@@ -54,7 +55,7 @@ func (controller *Group) LeaveGroup(c *fiber.Ctx) error {
 
 	whatsapp.SanitizePhone(&request.GroupID)
 
-	err = controller.Service.LeaveGroup(c.UserContext(), request)
+	err = controller.Service.LeaveGroup(c, request)
 	utils.PanicIfNeeded(err)
 
 	return c.JSON(utils.ResponseData{
@@ -69,7 +70,7 @@ func (controller *Group) CreateGroup(c *fiber.Ctx) error {
 	err := c.BodyParser(&request)
 	utils.PanicIfNeeded(err)
 
-	groupID, err := controller.Service.CreateGroup(c.UserContext(), request)
+	groupID, err := controller.Service.CreateGroup(c, request)
 	utils.PanicIfNeeded(err)
 
 	return c.JSON(utils.ResponseData{
@@ -112,7 +113,7 @@ func (controller *Group) ListParticipantRequests(c *fiber.Ctx) error {
 
 	whatsapp.SanitizePhone(&request.GroupID)
 
-	result, err := controller.Service.GetGroupRequestParticipants(c.UserContext(), request)
+	result, err := controller.Service.GetGroupRequestParticipants(c, request)
 	utils.PanicIfNeeded(err)
 
 	return c.JSON(utils.ResponseData{
@@ -138,7 +139,7 @@ func (controller *Group) manageParticipants(c *fiber.Ctx, action whatsmeow.Parti
 	utils.PanicIfNeeded(err)
 	whatsapp.SanitizePhone(&request.GroupID)
 	request.Action = action
-	result, err := controller.Service.ManageParticipant(c.UserContext(), request)
+	result, err := controller.Service.ManageParticipant(c, request)
 	utils.PanicIfNeeded(err)
 	return c.JSON(utils.ResponseData{
 		Status:  200,
@@ -155,7 +156,7 @@ func (controller *Group) handleRequestedParticipants(c *fiber.Ctx, action whatsm
 	utils.PanicIfNeeded(err)
 	whatsapp.SanitizePhone(&request.GroupID)
 	request.Action = action
-	result, err := controller.Service.ManageGroupRequestParticipants(c.UserContext(), request)
+	result, err := controller.Service.ManageGroupRequestParticipants(c, request)
 	utils.PanicIfNeeded(err)
 	return c.JSON(utils.ResponseData{
 		Status:  200,

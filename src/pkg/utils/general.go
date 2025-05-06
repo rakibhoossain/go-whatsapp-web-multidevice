@@ -2,6 +2,8 @@ package utils
 
 import (
 	"bytes"
+	"crypto/rand"
+	"encoding/base64"
 	"fmt"
 	"image"
 	_ "image/gif"  // Register GIF format
@@ -276,4 +278,41 @@ func DownloadImageFromURL(url string) ([]byte, string, error) {
 		return nil, "", err
 	}
 	return imageData, fileName, nil
+}
+
+
+
+func IsValidHTTPSURL(urlString string) bool {
+	// Parse the URL
+	parsedURL, err := url.ParseRequestURI(urlString)
+	if err != nil {
+		return false // Invalid URL format
+	}
+
+	// Check if the scheme is "https" (case-insensitive)
+	if strings.ToLower(parsedURL.Scheme) != "https" {
+		return false // Not an HTTPS URL
+	}
+
+	// Check if the host is present
+	if parsedURL.Host == "" {
+		return false // Missing host
+	}
+
+	return true // It's a valid HTTPS URL
+}
+
+func GenerateUUID() string {
+	b := make([]byte, 16)
+	_, _ = rand.Read(b)
+	return fmt.Sprintf("%x-%x-%x-%x-%x", b[0:4], b[4:6], b[6:8], b[8:10], b[10:])
+}
+
+func GenerateSecretKey() string {
+	b := make([]byte, 32)
+	_, _ = rand.Read(b)
+	key := base64.URLEncoding.EncodeToString(b)
+	keyWithoutUnderscores := strings.ReplaceAll(key, "_", "")
+	keyWithoutUnderscores = strings.TrimRight(keyWithoutUnderscores, "=")
+	return strings.TrimLeft(keyWithoutUnderscores, "-")
 }

@@ -1,17 +1,16 @@
 package app
 
 import (
-	"context"
-	"time"
+	"github.com/gofiber/fiber/v2"
 )
 
 type IAppService interface {
-	Login(ctx context.Context) (response LoginResponse, err error)
-	LoginWithCode(ctx context.Context, phoneNumber string) (loginCode string, err error)
-	Logout(ctx context.Context) (err error)
-	Reconnect(ctx context.Context) (err error)
-	FirstDevice(ctx context.Context) (response DevicesResponse, err error)
-	FetchDevices(ctx context.Context) (response []DevicesResponse, err error)
+	Login(c *fiber.Ctx) (response LoginResponse, err error)
+	LoginWithCode(c *fiber.Ctx, phoneNumber string) (loginCode string, err error)
+	Logout(c *fiber.Ctx) (err error)
+	Reconnect(c *fiber.Ctx) (err error)
+	FirstDevice(c *fiber.Ctx) (response DevicesResponse, err error)
+	FetchDevices(c *fiber.Ctx) (response []DevicesResponse, err error)
 }
 
 type DevicesResponse struct {
@@ -20,7 +19,6 @@ type DevicesResponse struct {
 }
 
 type LoginResponse struct {
-	ImagePath string        `json:"image_path"`
-	Duration  time.Duration `json:"duration"`
-	Code      string        `json:"code"`
+	Duration int    `json:"duration"`
+	Code     string `json:"code"`
 }

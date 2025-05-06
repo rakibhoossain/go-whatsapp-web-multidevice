@@ -1,7 +1,6 @@
 package services
 
 import (
-	"context"
 	"fmt"
 	"net/http"
 	"os"
@@ -16,6 +15,7 @@ import (
 	"github.com/aldinokemal/go-whatsapp-web-multidevice/pkg/whatsapp"
 	"github.com/aldinokemal/go-whatsapp-web-multidevice/validations"
 	"github.com/disintegration/imaging"
+	"github.com/gofiber/fiber/v2"
 	fiberUtils "github.com/gofiber/fiber/v2/utils"
 	"github.com/sirupsen/logrus"
 	"github.com/valyala/fasthttp"
@@ -23,38 +23,61 @@ import (
 	"go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/types"
 	"google.golang.org/protobuf/proto"
+	"github.com/aldinokemal/go-whatsapp-web-multidevice/pkg/auth"
 )
 
 type serviceSend struct {
-	WaCli      *whatsmeow.Client
+	Clients    *map[string]*whatsapp.WhatsAppTenantClient
 	appService app.IAppService
 }
 
-func NewSendService(waCli *whatsmeow.Client, appService app.IAppService) domainSend.ISendService {
+func NewSendService(clients *map[string]*whatsapp.WhatsAppTenantClient, appService app.IAppService) domainSend.ISendService {
 	return &serviceSend{
-		WaCli:      waCli,
+		Clients:    clients,
 		appService: appService,
 	}
 }
 
 // wrapSendMessage wraps the message sending process with message ID saving
-func (service serviceSend) wrapSendMessage(ctx context.Context, recipient types.JID, msg *waE2E.Message, content string) (whatsmeow.SendResponse, error) {
-	ts, err := service.WaCli.SendMessage(ctx, recipient, msg)
+func (service serviceSend) wrapSendMessage(c *fiber.Ctx, recipient types.JID, msg *waE2E.Message, content string) (whatsmeow.SendResponse, error) {
+
+	authPayload, err := auth.AuthPayload(c)
 	if err != nil {
 		return whatsmeow.SendResponse{}, err
 	}
 
-	utils.RecordMessage(ts.ID, service.WaCli.Store.ID.String(), content)
+	tenantClient, err := whatsapp.GetWhatsappTenantClient(service.Clients, authPayload.User)
+	if err != nil {
+		return whatsmeow.SendResponse{}, err
+	}
+
+	ts, err := tenantClient.Conn.SendMessage(c.UserContext(), recipient, msg)
+	if err != nil {
+		return whatsmeow.SendResponse{}, err
+	}
+
+	utils.RecordMessage(ts.ID, tenantClient.Conn.Store.ID.String(), content)
 
 	return ts, nil
 }
 
-func (service serviceSend) SendText(ctx context.Context, request domainSend.MessageRequest) (response domainSend.GenericResponse, err error) {
-	err = validations.ValidateSendMessage(ctx, request)
+func (service serviceSend) SendText(c *fiber.Ctx, request domainSend.MessageRequest) (response domainSend.GenericResponse, err error) {
+	
+	authPayload, err := auth.AuthPayload(c)
 	if err != nil {
 		return response, err
 	}
-	dataWaRecipient, err := whatsapp.ValidateJidWithLogin(service.WaCli, request.Phone)
+
+	tenantClient, err := whatsapp.GetWhatsappTenantClient(service.Clients, authPayload.User)
+	if err != nil {
+		return response, err
+	}
+
+	err = validations.ValidateSendMessage(c.UserContext(), request)
+	if err != nil {
+		return response, err
+	}
+	dataWaRecipient, err := whatsapp.ValidateJidWithLogin(tenantClient.Conn, request.Phone)
 	if err != nil {
 		return response, err
 	}
@@ -73,7 +96,7 @@ func (service serviceSend) SendText(ctx context.Context, request domainSend.Mess
 		msg.ExtendedTextMessage.ContextInfo.ForwardingScore = proto.Uint32(100)
 	}
 
-	parsedMentions := service.getMentionFromText(ctx, request.Message)
+	parsedMentions := service.getMentionFromText(c, request.Message)
 	if len(parsedMentions) > 0 {
 		msg.ExtendedTextMessage.ContextInfo.MentionedJID = parsedMentions
 	}
@@ -101,7 +124,7 @@ func (service serviceSend) SendText(ctx context.Context, request domainSend.Mess
 		}
 	}
 
-	ts, err := service.wrapSendMessage(ctx, dataWaRecipient, msg, request.Message)
+	ts, err := service.wrapSendMessage(c, dataWaRecipient, msg, request.Message)
 	if err != nil {
 		return response, err
 	}
@@ -111,12 +134,23 @@ func (service serviceSend) SendText(ctx context.Context, request domainSend.Mess
 	return response, nil
 }
 
-func (service serviceSend) SendImage(ctx context.Context, request domainSend.ImageRequest) (response domainSend.GenericResponse, err error) {
-	err = validations.ValidateSendImage(ctx, request)
+func (service serviceSend) SendImage(c *fiber.Ctx, request domainSend.ImageRequest) (response domainSend.GenericResponse, err error) {
+	
+	authPayload, err := auth.AuthPayload(c)
 	if err != nil {
 		return response, err
 	}
-	dataWaRecipient, err := whatsapp.ValidateJidWithLogin(service.WaCli, request.Phone)
+
+	tenantClient, err := whatsapp.GetWhatsappTenantClient(service.Clients, authPayload.User)
+	if err != nil {
+		return response, err
+	}
+	
+	err = validations.ValidateSendImage(c.UserContext(), request)
+	if err != nil {
+		return response, err
+	}
+	dataWaRecipient, err := whatsapp.ValidateJidWithLogin(tenantClient.Conn, request.Phone)
 	if err != nil {
 		return response, err
 	}
@@ -189,7 +223,7 @@ func (service serviceSend) SendImage(ctx context.Context, request domainSend.Ima
 	if err != nil {
 		return response, err
 	}
-	uploadedImage, err := service.uploadMedia(ctx, whatsmeow.MediaImage, dataWaImage, dataWaRecipient)
+	uploadedImage, err := service.uploadMedia(c, whatsmeow.MediaImage, dataWaImage, dataWaRecipient)
 	if err != nil {
 		fmt.Printf("failed to upload file: %v", err)
 		return response, err
@@ -223,7 +257,7 @@ func (service serviceSend) SendImage(ctx context.Context, request domainSend.Ima
 	if request.Caption != "" {
 		caption = "🖼️ " + request.Caption
 	}
-	ts, err := service.wrapSendMessage(ctx, dataWaRecipient, msg, caption)
+	ts, err := service.wrapSendMessage(c, dataWaRecipient, msg, caption)
 	go func() {
 		errDelete := utils.RemoveFile(0, deletedItems...)
 		if errDelete != nil {
@@ -239,12 +273,24 @@ func (service serviceSend) SendImage(ctx context.Context, request domainSend.Ima
 	return response, nil
 }
 
-func (service serviceSend) SendFile(ctx context.Context, request domainSend.FileRequest) (response domainSend.GenericResponse, err error) {
-	err = validations.ValidateSendFile(ctx, request)
+func (service serviceSend) SendFile(c *fiber.Ctx, request domainSend.FileRequest) (response domainSend.GenericResponse, err error) {
+	
+
+	authPayload, err := auth.AuthPayload(c)
 	if err != nil {
 		return response, err
 	}
-	dataWaRecipient, err := whatsapp.ValidateJidWithLogin(service.WaCli, request.Phone)
+
+	tenantClient, err := whatsapp.GetWhatsappTenantClient(service.Clients, authPayload.User)
+	if err != nil {
+		return response, err
+	}
+	
+	err = validations.ValidateSendFile(c.UserContext(), request)
+	if err != nil {
+		return response, err
+	}
+	dataWaRecipient, err := whatsapp.ValidateJidWithLogin(tenantClient.Conn, request.Phone)
 	if err != nil {
 		return response, err
 	}
@@ -253,7 +299,7 @@ func (service serviceSend) SendFile(ctx context.Context, request domainSend.File
 	fileMimeType := http.DetectContentType(fileBytes)
 
 	// Send to WA server
-	uploadedFile, err := service.uploadMedia(ctx, whatsmeow.MediaDocument, fileBytes, dataWaRecipient)
+	uploadedFile, err := service.uploadMedia(c, whatsmeow.MediaDocument, fileBytes, dataWaRecipient)
 	if err != nil {
 		fmt.Printf("Failed to upload file: %v", err)
 		return response, err
@@ -283,7 +329,7 @@ func (service serviceSend) SendFile(ctx context.Context, request domainSend.File
 	if request.Caption != "" {
 		caption = "📄 " + request.Caption
 	}
-	ts, err := service.wrapSendMessage(ctx, dataWaRecipient, msg, caption)
+	ts, err := service.wrapSendMessage(c, dataWaRecipient, msg, caption)
 	if err != nil {
 		return response, err
 	}
@@ -293,12 +339,24 @@ func (service serviceSend) SendFile(ctx context.Context, request domainSend.File
 	return response, nil
 }
 
-func (service serviceSend) SendVideo(ctx context.Context, request domainSend.VideoRequest) (response domainSend.GenericResponse, err error) {
-	err = validations.ValidateSendVideo(ctx, request)
+func (service serviceSend) SendVideo(c *fiber.Ctx, request domainSend.VideoRequest) (response domainSend.GenericResponse, err error) {
+	
+
+	authPayload, err := auth.AuthPayload(c)
 	if err != nil {
 		return response, err
 	}
-	dataWaRecipient, err := whatsapp.ValidateJidWithLogin(service.WaCli, request.Phone)
+
+	tenantClient, err := whatsapp.GetWhatsappTenantClient(service.Clients, authPayload.User)
+	if err != nil {
+		return response, err
+	}
+	
+	err = validations.ValidateSendVideo(c.UserContext(), request)
+	if err != nil {
+		return response, err
+	}
+	dataWaRecipient, err := whatsapp.ValidateJidWithLogin(tenantClient.Conn, request.Phone)
 	if err != nil {
 		return response, err
 	}
@@ -367,7 +425,7 @@ func (service serviceSend) SendVideo(ctx context.Context, request domainSend.Vid
 	if err != nil {
 		return response, err
 	}
-	uploaded, err := service.uploadMedia(ctx, whatsmeow.MediaVideo, dataWaVideo, dataWaRecipient)
+	uploaded, err := service.uploadMedia(c, whatsmeow.MediaVideo, dataWaVideo, dataWaRecipient)
 	if err != nil {
 		return response, pkgError.InternalServerError(fmt.Sprintf("Failed to upload file: %v", err))
 	}
@@ -403,7 +461,7 @@ func (service serviceSend) SendVideo(ctx context.Context, request domainSend.Vid
 	if request.Caption != "" {
 		caption = "🎥 " + request.Caption
 	}
-	ts, err := service.wrapSendMessage(ctx, dataWaRecipient, msg, caption)
+	ts, err := service.wrapSendMessage(c, dataWaRecipient, msg, caption)
 	go func() {
 		errDelete := utils.RemoveFile(1, deletedItems...)
 		if errDelete != nil {
@@ -419,12 +477,24 @@ func (service serviceSend) SendVideo(ctx context.Context, request domainSend.Vid
 	return response, nil
 }
 
-func (service serviceSend) SendContact(ctx context.Context, request domainSend.ContactRequest) (response domainSend.GenericResponse, err error) {
-	err = validations.ValidateSendContact(ctx, request)
+func (service serviceSend) SendContact(c *fiber.Ctx, request domainSend.ContactRequest) (response domainSend.GenericResponse, err error) {
+	
+
+	authPayload, err := auth.AuthPayload(c)
 	if err != nil {
 		return response, err
 	}
-	dataWaRecipient, err := whatsapp.ValidateJidWithLogin(service.WaCli, request.Phone)
+
+	tenantClient, err := whatsapp.GetWhatsappTenantClient(service.Clients, authPayload.User)
+	if err != nil {
+		return response, err
+	}
+	
+	err = validations.ValidateSendContact(c.UserContext(), request)
+	if err != nil {
+		return response, err
+	}
+	dataWaRecipient, err := whatsapp.ValidateJidWithLogin(tenantClient.Conn, request.Phone)
 	if err != nil {
 		return response, err
 	}
@@ -445,7 +515,7 @@ func (service serviceSend) SendContact(ctx context.Context, request domainSend.C
 
 	content := "👤 " + request.ContactName
 
-	ts, err := service.wrapSendMessage(ctx, dataWaRecipient, msg, content)
+	ts, err := service.wrapSendMessage(c, dataWaRecipient, msg, content)
 	if err != nil {
 		return response, err
 	}
@@ -455,12 +525,24 @@ func (service serviceSend) SendContact(ctx context.Context, request domainSend.C
 	return response, nil
 }
 
-func (service serviceSend) SendLink(ctx context.Context, request domainSend.LinkRequest) (response domainSend.GenericResponse, err error) {
-	err = validations.ValidateSendLink(ctx, request)
+func (service serviceSend) SendLink(c *fiber.Ctx, request domainSend.LinkRequest) (response domainSend.GenericResponse, err error) {
+	
+	
+	authPayload, err := auth.AuthPayload(c)
 	if err != nil {
 		return response, err
 	}
-	dataWaRecipient, err := whatsapp.ValidateJidWithLogin(service.WaCli, request.Phone)
+
+	tenantClient, err := whatsapp.GetWhatsappTenantClient(service.Clients, authPayload.User)
+	if err != nil {
+		return response, err
+	}	
+	
+	err = validations.ValidateSendLink(c.UserContext(), request)
+	if err != nil {
+		return response, err
+	}
+	dataWaRecipient, err := whatsapp.ValidateJidWithLogin(tenantClient.Conn, request.Phone)
 	if err != nil {
 		return response, err
 	}
@@ -495,7 +577,7 @@ func (service serviceSend) SendLink(ctx context.Context, request domainSend.Link
 
 	// If we have a thumbnail image, upload it to WhatsApp's servers
 	if len(metadata.ImageThumb) > 0 && metadata.Height != nil && metadata.Width != nil {
-		uploadedThumb, err := service.uploadMedia(ctx, whatsmeow.MediaLinkThumbnail, metadata.ImageThumb, dataWaRecipient)
+		uploadedThumb, err := service.uploadMedia(c, whatsmeow.MediaLinkThumbnail, metadata.ImageThumb, dataWaRecipient)
 		if err == nil {
 			// Update the message with the uploaded thumbnail information
 			msg.ExtendedTextMessage.ThumbnailDirectPath = proto.String(uploadedThumb.DirectPath)
@@ -513,7 +595,7 @@ func (service serviceSend) SendLink(ctx context.Context, request domainSend.Link
 	if request.Caption != "" {
 		content = "🔗 " + request.Caption
 	}
-	ts, err := service.wrapSendMessage(ctx, dataWaRecipient, msg, content)
+	ts, err := service.wrapSendMessage(c, dataWaRecipient, msg, content)
 	if err != nil {
 		return response, err
 	}
@@ -523,12 +605,24 @@ func (service serviceSend) SendLink(ctx context.Context, request domainSend.Link
 	return response, nil
 }
 
-func (service serviceSend) SendLocation(ctx context.Context, request domainSend.LocationRequest) (response domainSend.GenericResponse, err error) {
-	err = validations.ValidateSendLocation(ctx, request)
+func (service serviceSend) SendLocation(c *fiber.Ctx, request domainSend.LocationRequest) (response domainSend.GenericResponse, err error) {
+	
+
+	authPayload, err := auth.AuthPayload(c)
 	if err != nil {
 		return response, err
 	}
-	dataWaRecipient, err := whatsapp.ValidateJidWithLogin(service.WaCli, request.Phone)
+
+	tenantClient, err := whatsapp.GetWhatsappTenantClient(service.Clients, authPayload.User)
+	if err != nil {
+		return response, err
+	}
+	
+	err = validations.ValidateSendLocation(c.UserContext(), request)
+	if err != nil {
+		return response, err
+	}
+	dataWaRecipient, err := whatsapp.ValidateJidWithLogin(tenantClient.Conn, request.Phone)
 	if err != nil {
 		return response, err
 	}
@@ -551,7 +645,7 @@ func (service serviceSend) SendLocation(ctx context.Context, request domainSend.
 	content := "📍 " + request.Latitude + ", " + request.Longitude
 
 	// Send WhatsApp Message Proto
-	ts, err := service.wrapSendMessage(ctx, dataWaRecipient, msg, content)
+	ts, err := service.wrapSendMessage(c, dataWaRecipient, msg, content)
 	if err != nil {
 		return response, err
 	}
@@ -561,12 +655,24 @@ func (service serviceSend) SendLocation(ctx context.Context, request domainSend.
 	return response, nil
 }
 
-func (service serviceSend) SendAudio(ctx context.Context, request domainSend.AudioRequest) (response domainSend.GenericResponse, err error) {
-	err = validations.ValidateSendAudio(ctx, request)
+func (service serviceSend) SendAudio(c *fiber.Ctx, request domainSend.AudioRequest) (response domainSend.GenericResponse, err error) {
+	
+
+	authPayload, err := auth.AuthPayload(c)
 	if err != nil {
 		return response, err
 	}
-	dataWaRecipient, err := whatsapp.ValidateJidWithLogin(service.WaCli, request.Phone)
+
+	tenantClient, err := whatsapp.GetWhatsappTenantClient(service.Clients, authPayload.User)
+	if err != nil {
+		return response, err
+	}
+	
+	err = validations.ValidateSendAudio(c.UserContext(), request)
+	if err != nil {
+		return response, err
+	}
+	dataWaRecipient, err := whatsapp.ValidateJidWithLogin(tenantClient.Conn, request.Phone)
 	if err != nil {
 		return response, err
 	}
@@ -574,7 +680,7 @@ func (service serviceSend) SendAudio(ctx context.Context, request domainSend.Aud
 	autioBytes := helpers.MultipartFormFileHeaderToBytes(request.Audio)
 	audioMimeType := http.DetectContentType(autioBytes)
 
-	audioUploaded, err := service.uploadMedia(ctx, whatsmeow.MediaAudio, autioBytes, dataWaRecipient)
+	audioUploaded, err := service.uploadMedia(c, whatsmeow.MediaAudio, autioBytes, dataWaRecipient)
 	if err != nil {
 		err = pkgError.WaUploadMediaError(fmt.Sprintf("Failed to upload audio: %v", err))
 		return response, err
@@ -601,7 +707,7 @@ func (service serviceSend) SendAudio(ctx context.Context, request domainSend.Aud
 
 	content := "🎵 Audio"
 
-	ts, err := service.wrapSendMessage(ctx, dataWaRecipient, msg, content)
+	ts, err := service.wrapSendMessage(c, dataWaRecipient, msg, content)
 	if err != nil {
 		return response, err
 	}
@@ -611,21 +717,32 @@ func (service serviceSend) SendAudio(ctx context.Context, request domainSend.Aud
 	return response, nil
 }
 
-func (service serviceSend) SendPoll(ctx context.Context, request domainSend.PollRequest) (response domainSend.GenericResponse, err error) {
-	err = validations.ValidateSendPoll(ctx, request)
+func (service serviceSend) SendPoll(c *fiber.Ctx, request domainSend.PollRequest) (response domainSend.GenericResponse, err error) {
+	
+	authPayload, err := auth.AuthPayload(c)
 	if err != nil {
 		return response, err
 	}
-	dataWaRecipient, err := whatsapp.ValidateJidWithLogin(service.WaCli, request.Phone)
+
+	tenantClient, err := whatsapp.GetWhatsappTenantClient(service.Clients, authPayload.User)
+	if err != nil {
+		return response, err
+	}
+	
+	err = validations.ValidateSendPoll(c.UserContext(), request)
+	if err != nil {
+		return response, err
+	}
+	dataWaRecipient, err := whatsapp.ValidateJidWithLogin(tenantClient.Conn, request.Phone)
 	if err != nil {
 		return response, err
 	}
 
 	content := "📊 " + request.Question
 
-	msg := service.WaCli.BuildPollCreation(request.Question, request.Options, request.MaxAnswer)
+	msg := tenantClient.Conn.BuildPollCreation(request.Question, request.Options, request.MaxAnswer)
 
-	ts, err := service.wrapSendMessage(ctx, dataWaRecipient, msg, content)
+	ts, err := service.wrapSendMessage(c, dataWaRecipient, msg, content)
 	if err != nil {
 		return response, err
 	}
@@ -635,13 +752,24 @@ func (service serviceSend) SendPoll(ctx context.Context, request domainSend.Poll
 	return response, nil
 }
 
-func (service serviceSend) SendPresence(ctx context.Context, request domainSend.PresenceRequest) (response domainSend.GenericResponse, err error) {
-	err = validations.ValidateSendPresence(ctx, request)
+func (service serviceSend) SendPresence(c *fiber.Ctx, request domainSend.PresenceRequest) (response domainSend.GenericResponse, err error) {
+	
+	authPayload, err := auth.AuthPayload(c)
 	if err != nil {
 		return response, err
 	}
 
-	err = service.WaCli.SendPresence(types.Presence(request.Type))
+	tenantClient, err := whatsapp.GetWhatsappTenantClient(service.Clients, authPayload.User)
+	if err != nil {
+		return response, err
+	}
+	
+	err = validations.ValidateSendPresence(c.UserContext(), request)
+	if err != nil {
+		return response, err
+	}
+
+	err = tenantClient.Conn.SendPresence(types.Presence(request.Type))
 	if err != nil {
 		return response, err
 	}
@@ -651,22 +779,45 @@ func (service serviceSend) SendPresence(ctx context.Context, request domainSend.
 	return response, nil
 }
 
-func (service serviceSend) getMentionFromText(_ context.Context, messages string) (result []string) {
+func (service serviceSend) getMentionFromText(c *fiber.Ctx, messages string) (result []string) {
+	
+	authPayload, err := auth.AuthPayload(c)
+	if err != nil {
+		return result
+	}
+
+	tenantClient, err := whatsapp.GetWhatsappTenantClient(service.Clients, authPayload.User)
+	if err != nil {
+		return result
+	}
+	
 	mentions := utils.ContainsMention(messages)
 	for _, mention := range mentions {
 		// Get JID from phone number
-		if dataWaRecipient, err := whatsapp.ValidateJidWithLogin(service.WaCli, mention); err == nil {
+		if dataWaRecipient, err := whatsapp.ValidateJidWithLogin(tenantClient.Conn, mention); err == nil {
 			result = append(result, dataWaRecipient.String())
 		}
 	}
 	return result
 }
 
-func (service serviceSend) uploadMedia(ctx context.Context, mediaType whatsmeow.MediaType, media []byte, recipient types.JID) (uploaded whatsmeow.UploadResponse, err error) {
+func (service serviceSend) uploadMedia(c *fiber.Ctx, mediaType whatsmeow.MediaType, media []byte, recipient types.JID) (uploaded whatsmeow.UploadResponse, err error) {
+	
+
+	authPayload, err := auth.AuthPayload(c)
+	if err != nil {
+		return uploaded, err
+	}
+
+	tenantClient, err := whatsapp.GetWhatsappTenantClient(service.Clients, authPayload.User)
+	if err != nil {
+		return uploaded, err
+	}
+	
 	if recipient.Server == types.NewsletterServer {
-		uploaded, err = service.WaCli.UploadNewsletter(ctx, media, mediaType)
+		uploaded, err = tenantClient.Conn.UploadNewsletter(c.UserContext(), media, mediaType)
 	} else {
-		uploaded, err = service.WaCli.Upload(ctx, media, mediaType)
+		uploaded, err = tenantClient.Conn.Upload(c.UserContext(), media, mediaType)
 	}
 	return uploaded, err
 }

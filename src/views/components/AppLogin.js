@@ -5,7 +5,7 @@ export default {
     },
     data() {
         return {
-            login_link: '',
+            qr_code: '',
             login_duration_sec: 0,
         }
     },
@@ -28,7 +28,7 @@ export default {
             try {
                 let response = await window.http.get(`app/login`)
                 let results = response.data.results;
-                this.login_link = results.qr_link;
+                this.qr_code = results.qr_code;
                 this.login_duration_sec = results.qr_duration;
             } catch (error) {
                 if (error.response) {
@@ -57,7 +57,7 @@ export default {
         </div>
         <div class="image content">
             <div class="ui medium image">
-                <img :src="login_link" alt="qrCodeLogin">
+                <img :src="qr_code" alt="qrCodeLogin">
             </div>
             <div class="description">
                 <div class="ui header">Please scan to connect</div>

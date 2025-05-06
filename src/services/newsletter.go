@@ -1,32 +1,43 @@
 package services
 
 import (
-	"context"
 	domainNewsletter "github.com/aldinokemal/go-whatsapp-web-multidevice/domains/newsletter"
+	"github.com/aldinokemal/go-whatsapp-web-multidevice/pkg/auth"
 	"github.com/aldinokemal/go-whatsapp-web-multidevice/pkg/whatsapp"
 	"github.com/aldinokemal/go-whatsapp-web-multidevice/validations"
-	"go.mau.fi/whatsmeow"
+	"github.com/gofiber/fiber/v2"
 )
 
 type newsletterService struct {
-	WaCli *whatsmeow.Client
+	Clients *map[string]*whatsapp.WhatsAppTenantClient
 }
 
-func NewNewsletterService(waCli *whatsmeow.Client) domainNewsletter.INewsletterService {
+func NewNewsletterService(clients *map[string]*whatsapp.WhatsAppTenantClient) domainNewsletter.INewsletterService {
 	return &newsletterService{
-		WaCli: waCli,
+		Clients: clients,
 	}
 }
 
-func (service newsletterService) Unfollow(ctx context.Context, request domainNewsletter.UnfollowRequest) (err error) {
-	if err = validations.ValidateUnfollowNewsletter(ctx, request); err != nil {
-		return err
-	}
+func (service newsletterService) Unfollow(c *fiber.Ctx, request domainNewsletter.UnfollowRequest) (err error) {
 
-	JID, err := whatsapp.ValidateJidWithLogin(service.WaCli, request.NewsletterID)
+	authPayload, err := auth.AuthPayload(c)
 	if err != nil {
 		return err
 	}
 
-	return service.WaCli.UnfollowNewsletter(JID)
+	tenantClient, err := whatsapp.GetWhatsappTenantClient(service.Clients, authPayload.User)
+	if err != nil {
+		return err
+	}
+
+	if err = validations.ValidateUnfollowNewsletter(c.UserContext(), request); err != nil {
+		return err
+	}
+
+	JID, err := whatsapp.ValidateJidWithLogin(tenantClient.Conn, request.NewsletterID)
+	if err != nil {
+		return err
+	}
+
+	return tenantClient.Conn.UnfollowNewsletter(JID)
 }

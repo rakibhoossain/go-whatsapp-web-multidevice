@@ -1,9 +1,11 @@
 package newsletter
 
-import "context"
+import (
+	"github.com/gofiber/fiber/v2"
+)
 
 type INewsletterService interface {
-	Unfollow(ctx context.Context, request UnfollowRequest) (err error)
+	Unfollow(c *fiber.Ctx, request UnfollowRequest) (err error)
 }
 
 type UnfollowRequest struct {

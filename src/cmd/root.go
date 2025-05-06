@@ -231,15 +231,15 @@ func runRest(_ *cobra.Command, _ []string) {
 	}
 
 	db := whatsapp.InitWaDB()
-	cli := whatsapp.InitWaCLI(db)
+	clients := whatsapp.Startup()
 
 	// Service
-	appService := services.NewAppService(cli, db)
-	sendService := services.NewSendService(cli, appService)
-	userService := services.NewUserService(cli)
-	messageService := services.NewMessageService(cli)
-	groupService := services.NewGroupService(cli)
-	newsletterService := services.NewNewsletterService(cli)
+	appService := services.NewAppService(clients, db)
+	sendService := services.NewSendService(clients, appService)
+	userService := services.NewUserService(clients)
+	messageService := services.NewMessageService(clients)
+	groupService := services.NewGroupService(clients)
+	newsletterService := services.NewNewsletterService(clients)
 
 	// Rest
 	rest.InitRestApp(app, appService)
@@ -265,7 +265,7 @@ func runRest(_ *cobra.Command, _ []string) {
 	// Set auto reconnect to whatsapp server after booting
 	go helpers.SetAutoConnectAfterBooting(appService)
 	// Set auto reconnect checking
-	go helpers.SetAutoReconnectChecking(cli)
+	go helpers.SetAutoReconnectChecking(clients)
 	// Start auto flush chat csv
 	if config.WhatsappChatStorage {
 		go helpers.StartAutoFlushChatStorage()

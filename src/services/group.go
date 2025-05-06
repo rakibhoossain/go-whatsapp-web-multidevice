@@ -1,61 +1,96 @@
 package services
 
 import (
-	"context"
 	"fmt"
 
 	"github.com/aldinokemal/go-whatsapp-web-multidevice/config"
 	domainGroup "github.com/aldinokemal/go-whatsapp-web-multidevice/domains/group"
+	"github.com/aldinokemal/go-whatsapp-web-multidevice/pkg/auth"
 	pkgError "github.com/aldinokemal/go-whatsapp-web-multidevice/pkg/error"
 	"github.com/aldinokemal/go-whatsapp-web-multidevice/pkg/whatsapp"
 	"github.com/aldinokemal/go-whatsapp-web-multidevice/validations"
+	"github.com/gofiber/fiber/v2"
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/types"
 )
 
 type groupService struct {
-	WaCli *whatsmeow.Client
+	Clients *map[string]*whatsapp.WhatsAppTenantClient
 }
 
-func NewGroupService(waCli *whatsmeow.Client) domainGroup.IGroupService {
+func NewGroupService(clients *map[string]*whatsapp.WhatsAppTenantClient) domainGroup.IGroupService {
 	return &groupService{
-		WaCli: waCli,
+		Clients: clients,
 	}
 }
 
-func (service groupService) JoinGroupWithLink(ctx context.Context, request domainGroup.JoinGroupWithLinkRequest) (groupID string, err error) {
-	if err = validations.ValidateJoinGroupWithLink(ctx, request); err != nil {
+func (service groupService) JoinGroupWithLink(c *fiber.Ctx, request domainGroup.JoinGroupWithLinkRequest) (groupID string, err error) {
+
+	authPayload, err := auth.AuthPayload(c)
+	if err != nil {
 		return groupID, err
 	}
-	whatsapp.MustLogin(service.WaCli)
 
-	jid, err := service.WaCli.JoinGroupWithLink(request.Link)
+	tenantClient, err := whatsapp.GetWhatsappTenantClient(service.Clients, authPayload.User)
+	if err != nil {
+		return groupID, err
+	}
+
+	if err = validations.ValidateJoinGroupWithLink(c.UserContext(), request); err != nil {
+		return groupID, err
+	}
+
+	whatsapp.MustLogin(tenantClient.Conn)
+
+	jid, err := tenantClient.Conn.JoinGroupWithLink(request.Link)
 	if err != nil {
 		return
 	}
 	return jid.String(), nil
 }
 
-func (service groupService) LeaveGroup(ctx context.Context, request domainGroup.LeaveGroupRequest) (err error) {
-	if err = validations.ValidateLeaveGroup(ctx, request); err != nil {
-		return err
-	}
+func (service groupService) LeaveGroup(c *fiber.Ctx, request domainGroup.LeaveGroupRequest) (err error) {
 
-	JID, err := whatsapp.ValidateJidWithLogin(service.WaCli, request.GroupID)
+	authPayload, err := auth.AuthPayload(c)
 	if err != nil {
 		return err
 	}
 
-	return service.WaCli.LeaveGroup(JID)
+	tenantClient, err := whatsapp.GetWhatsappTenantClient(service.Clients, authPayload.User)
+	if err != nil {
+		return err
+	}
+
+	if err = validations.ValidateLeaveGroup(c.UserContext(), request); err != nil {
+		return err
+	}
+
+	JID, err := whatsapp.ValidateJidWithLogin(tenantClient.Conn, request.GroupID)
+	if err != nil {
+		return err
+	}
+
+	return tenantClient.Conn.LeaveGroup(JID)
 }
 
-func (service groupService) CreateGroup(ctx context.Context, request domainGroup.CreateGroupRequest) (groupID string, err error) {
-	if err = validations.ValidateCreateGroup(ctx, request); err != nil {
+func (service groupService) CreateGroup(c *fiber.Ctx, request domainGroup.CreateGroupRequest) (groupID string, err error) {
+
+	authPayload, err := auth.AuthPayload(c)
+	if err != nil {
 		return groupID, err
 	}
-	whatsapp.MustLogin(service.WaCli)
 
-	participantsJID, err := service.participantToJID(request.Participants)
+	tenantClient, err := whatsapp.GetWhatsappTenantClient(service.Clients, authPayload.User)
+	if err != nil {
+		return groupID, err
+	}
+
+	if err = validations.ValidateCreateGroup(c.UserContext(), request); err != nil {
+		return groupID, err
+	}
+	whatsapp.MustLogin(tenantClient.Conn)
+
+	participantsJID, err := service.participantToJID(tenantClient.Conn, request.Participants)
 	if err != nil {
 		return
 	}
@@ -67,7 +102,7 @@ func (service groupService) CreateGroup(ctx context.Context, request domainGroup
 		GroupLinkedParent: types.GroupLinkedParent{},
 	}
 
-	groupInfo, err := service.WaCli.CreateGroup(groupConfig)
+	groupInfo, err := tenantClient.Conn.CreateGroup(groupConfig)
 	if err != nil {
 		return
 	}
@@ -75,23 +110,34 @@ func (service groupService) CreateGroup(ctx context.Context, request domainGroup
 	return groupInfo.JID.String(), nil
 }
 
-func (service groupService) ManageParticipant(ctx context.Context, request domainGroup.ParticipantRequest) (result []domainGroup.ParticipantStatus, err error) {
-	if err = validations.ValidateParticipant(ctx, request); err != nil {
-		return result, err
-	}
-	whatsapp.MustLogin(service.WaCli)
+func (service groupService) ManageParticipant(c *fiber.Ctx, request domainGroup.ParticipantRequest) (result []domainGroup.ParticipantStatus, err error) {
 
-	groupJID, err := whatsapp.ValidateJidWithLogin(service.WaCli, request.GroupID)
+	authPayload, err := auth.AuthPayload(c)
 	if err != nil {
 		return result, err
 	}
 
-	participantsJID, err := service.participantToJID(request.Participants)
+	tenantClient, err := whatsapp.GetWhatsappTenantClient(service.Clients, authPayload.User)
 	if err != nil {
 		return result, err
 	}
 
-	participants, err := service.WaCli.UpdateGroupParticipants(groupJID, participantsJID, request.Action)
+	if err = validations.ValidateParticipant(c.UserContext(), request); err != nil {
+		return result, err
+	}
+	whatsapp.MustLogin(tenantClient.Conn)
+
+	groupJID, err := whatsapp.ValidateJidWithLogin(tenantClient.Conn, request.GroupID)
+	if err != nil {
+		return result, err
+	}
+
+	participantsJID, err := service.participantToJID(tenantClient.Conn, request.Participants)
+	if err != nil {
+		return result, err
+	}
+
+	participants, err := tenantClient.Conn.UpdateGroupParticipants(groupJID, participantsJID, request.Action)
 	if err != nil {
 		return result, err
 	}
@@ -115,17 +161,28 @@ func (service groupService) ManageParticipant(ctx context.Context, request domai
 	return result, nil
 }
 
-func (service groupService) GetGroupRequestParticipants(ctx context.Context, request domainGroup.GetGroupRequestParticipantsRequest) (result []domainGroup.GetGroupRequestParticipantsResponse, err error) {
-	if err = validations.ValidateGetGroupRequestParticipants(ctx, request); err != nil {
-		return result, err
-	}
+func (service groupService) GetGroupRequestParticipants(c *fiber.Ctx, request domainGroup.GetGroupRequestParticipantsRequest) (result []domainGroup.GetGroupRequestParticipantsResponse, err error) {
 
-	groupJID, err := whatsapp.ValidateJidWithLogin(service.WaCli, request.GroupID)
+	authPayload, err := auth.AuthPayload(c)
 	if err != nil {
 		return result, err
 	}
 
-	participants, err := service.WaCli.GetGroupRequestParticipants(groupJID)
+	tenantClient, err := whatsapp.GetWhatsappTenantClient(service.Clients, authPayload.User)
+	if err != nil {
+		return result, err
+	}
+
+	if err = validations.ValidateGetGroupRequestParticipants(c.UserContext(), request); err != nil {
+		return result, err
+	}
+
+	groupJID, err := whatsapp.ValidateJidWithLogin(tenantClient.Conn, request.GroupID)
+	if err != nil {
+		return result, err
+	}
+
+	participants, err := tenantClient.Conn.GetGroupRequestParticipants(groupJID)
 	if err != nil {
 		return result, err
 	}
@@ -140,22 +197,33 @@ func (service groupService) GetGroupRequestParticipants(ctx context.Context, req
 	return result, nil
 }
 
-func (service groupService) ManageGroupRequestParticipants(ctx context.Context, request domainGroup.GroupRequestParticipantsRequest) (result []domainGroup.ParticipantStatus, err error) {
-	if err = validations.ValidateManageGroupRequestParticipants(ctx, request); err != nil {
-		return result, err
-	}
+func (service groupService) ManageGroupRequestParticipants(c *fiber.Ctx, request domainGroup.GroupRequestParticipantsRequest) (result []domainGroup.ParticipantStatus, err error) {
 
-	groupJID, err := whatsapp.ValidateJidWithLogin(service.WaCli, request.GroupID)
+	authPayload, err := auth.AuthPayload(c)
 	if err != nil {
 		return result, err
 	}
 
-	participantsJID, err := service.participantToJID(request.Participants)
+	tenantClient, err := whatsapp.GetWhatsappTenantClient(service.Clients, authPayload.User)
 	if err != nil {
 		return result, err
 	}
 
-	participants, err := service.WaCli.UpdateGroupRequestParticipants(groupJID, participantsJID, request.Action)
+	if err = validations.ValidateManageGroupRequestParticipants(c.UserContext(), request); err != nil {
+		return result, err
+	}
+
+	groupJID, err := whatsapp.ValidateJidWithLogin(tenantClient.Conn, request.GroupID)
+	if err != nil {
+		return result, err
+	}
+
+	participantsJID, err := service.participantToJID(tenantClient.Conn, request.Participants)
+	if err != nil {
+		return result, err
+	}
+
+	participants, err := tenantClient.Conn.UpdateGroupRequestParticipants(groupJID, participantsJID, request.Action)
 	if err != nil {
 		return result, err
 	}
@@ -179,12 +247,13 @@ func (service groupService) ManageGroupRequestParticipants(ctx context.Context, 
 	return result, nil
 }
 
-func (service groupService) participantToJID(participants []string) ([]types.JID, error) {
+func (service groupService) participantToJID(waCli *whatsmeow.Client, participants []string) ([]types.JID, error) {
+
 	var participantsJID []types.JID
 	for _, participant := range participants {
 		formattedParticipant := participant + config.WhatsappTypeUser
 
-		if !whatsapp.IsOnWhatsapp(service.WaCli, formattedParticipant) {
+		if !whatsapp.IsOnWhatsapp(waCli, formattedParticipant) {
 			return nil, pkgError.ErrUserNotRegistered
 		}
 

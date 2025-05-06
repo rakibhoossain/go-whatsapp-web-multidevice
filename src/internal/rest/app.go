@@ -1,8 +1,8 @@
 package rest
 
 import (
-	"fmt"
 	domainApp "github.com/aldinokemal/go-whatsapp-web-multidevice/domains/app"
+	"github.com/aldinokemal/go-whatsapp-web-multidevice/pkg/auth"
 	"github.com/aldinokemal/go-whatsapp-web-multidevice/pkg/utils"
 	"github.com/gofiber/fiber/v2"
 )
@@ -13,17 +13,18 @@ type App struct {
 
 func InitRestApp(app *fiber.App, service domainApp.IAppService) App {
 	rest := App{Service: service}
-	app.Get("/app/login", rest.Login)
-	app.Get("/app/login-with-code", rest.LoginWithCode)
-	app.Get("/app/logout", rest.Logout)
-	app.Get("/app/reconnect", rest.Reconnect)
-	app.Get("/app/devices", rest.Devices)
+	app.Get("/app/login", auth.BasicAuth(), rest.Login)
+	app.Get("/app/login-with-code", auth.BasicAuth(), rest.LoginWithCode)
+	app.Get("/app/logout", auth.BasicAuth(), rest.Logout)
+	app.Get("/app/reconnect", auth.BasicAuth(), rest.Reconnect)
+	app.Get("/app/devices", auth.BasicAuth(), rest.Devices)
 
 	return App{Service: service}
 }
 
 func (handler *App) Login(c *fiber.Ctx) error {
-	response, err := handler.Service.Login(c.UserContext())
+
+	response, err := handler.Service.Login(c)
 	utils.PanicIfNeeded(err)
 
 	return c.JSON(utils.ResponseData{
@@ -31,14 +32,14 @@ func (handler *App) Login(c *fiber.Ctx) error {
 		Code:    "SUCCESS",
 		Message: "Login success",
 		Results: map[string]any{
-			"qr_link":     fmt.Sprintf("%s://%s/%s", c.Protocol(), c.Hostname(), response.ImagePath),
+			"qr_code":     response.Code,
 			"qr_duration": response.Duration,
 		},
 	})
 }
 
 func (handler *App) LoginWithCode(c *fiber.Ctx) error {
-	pairCode, err := handler.Service.LoginWithCode(c.UserContext(), c.Query("phone"))
+	pairCode, err := handler.Service.LoginWithCode(c, c.Query("phone"))
 	utils.PanicIfNeeded(err)
 
 	return c.JSON(utils.ResponseData{
@@ -52,7 +53,7 @@ func (handler *App) LoginWithCode(c *fiber.Ctx) error {
 }
 
 func (handler *App) Logout(c *fiber.Ctx) error {
-	err := handler.Service.Logout(c.UserContext())
+	err := handler.Service.Logout(c)
 	utils.PanicIfNeeded(err)
 
 	return c.JSON(utils.ResponseData{
@@ -64,7 +65,7 @@ func (handler *App) Logout(c *fiber.Ctx) error {
 }
 
 func (handler *App) Reconnect(c *fiber.Ctx) error {
-	err := handler.Service.Reconnect(c.UserContext())
+	err := handler.Service.Reconnect(c)
 	utils.PanicIfNeeded(err)
 
 	return c.JSON(utils.ResponseData{
@@ -76,7 +77,7 @@ func (handler *App) Reconnect(c *fiber.Ctx) error {
 }
 
 func (handler *App) Devices(c *fiber.Ctx) error {
-	devices, err := handler.Service.FetchDevices(c.UserContext())
+	devices, err := handler.Service.FetchDevices(c)
 	utils.PanicIfNeeded(err)
 
 	return c.JSON(utils.ResponseData{
