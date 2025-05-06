@@ -18,7 +18,8 @@ import (
 	"github.com/aldinokemal/go-whatsapp-web-multidevice/services"
 	"github.com/dustin/go-humanize"
 	"github.com/gofiber/fiber/v2"
-	"github.com/gofiber/fiber/v2/middleware/basicauth"
+
+	// "github.com/gofiber/fiber/v2/middleware/basicauth"
 	"github.com/gofiber/fiber/v2/middleware/cors"
 	"github.com/gofiber/fiber/v2/middleware/filesystem"
 	"github.com/gofiber/fiber/v2/middleware/logger"
@@ -206,7 +207,7 @@ func runRest(_ *cobra.Command, _ []string) {
 	}))
 
 	app.Use(middleware.Recovery())
-	app.Use(middleware.BasicAuth())
+	// app.Use(middleware.BasicAuth())
 	if config.AppDebug {
 		app.Use(logger.New())
 	}
@@ -215,20 +216,20 @@ func runRest(_ *cobra.Command, _ []string) {
 		AllowHeaders: "Origin, Content-Type, Accept",
 	}))
 
-	if len(config.AppBasicAuthCredential) > 0 {
-		account := make(map[string]string)
-		for _, basicAuth := range config.AppBasicAuthCredential {
-			ba := strings.Split(basicAuth, ":")
-			if len(ba) != 2 {
-				log.Fatalln("Basic auth is not valid, please this following format <user>:<secret>")
-			}
-			account[ba[0]] = ba[1]
-		}
+	// if len(config.AppBasicAuthCredential) > 0 {
+	// 	account := make(map[string]string)
+	// 	for _, basicAuth := range config.AppBasicAuthCredential {
+	// 		ba := strings.Split(basicAuth, ":")
+	// 		if len(ba) != 2 {
+	// 			log.Fatalln("Basic auth is not valid, please this following format <user>:<secret>")
+	// 		}
+	// 		account[ba[0]] = ba[1]
+	// 	}
 
-		app.Use(basicauth.New(basicauth.Config{
-			Users: account,
-		}))
-	}
+	// 	app.Use(basicauth.New(basicauth.Config{
+	// 		Users: account,
+	// 	}))
+	// }
 
 	db := whatsapp.InitWaDB()
 	clients := whatsapp.Startup()
