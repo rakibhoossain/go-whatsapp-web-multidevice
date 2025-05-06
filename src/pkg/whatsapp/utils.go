@@ -9,9 +9,9 @@ import (
 	"mime"
 	"os"
 	"regexp"
+	"runtime"
 	"strings"
 	"time"
-	"runtime"
 
 	"github.com/google/uuid"
 	"github.com/sirupsen/logrus"
@@ -20,18 +20,19 @@ import (
 	"github.com/aldinokemal/go-whatsapp-web-multidevice/config"
 	pkgError "github.com/aldinokemal/go-whatsapp-web-multidevice/pkg/error"
 	"go.mau.fi/whatsmeow"
+	"go.mau.fi/whatsmeow/proto/waCompanionReg"
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
-	"go.mau.fi/whatsmeow/proto/waCompanionReg"
 )
 
 // ExtractMedia is a helper function to extract media from whatsapp
-func ExtractMedia(storageLocation string, mediaFile whatsmeow.DownloadableMessage) (extractedMedia ExtractedMedia, err error) {
+func ExtractMedia(cli *whatsmeow.Client, storageLocation string, mediaFile whatsmeow.DownloadableMessage) (extractedMedia ExtractedMedia, err error) {
 	if mediaFile == nil {
 		logrus.Info("Skip download because data is nil")
 		return extractedMedia, nil
 	}
 
+	// User whatsapp connection
 	data, err := cli.Download(mediaFile)
 	if err != nil {
 		return extractedMedia, err
@@ -198,7 +199,7 @@ func isGroupJid(jid string) bool {
 }
 
 // isFromMySelf is a helper function to check if the message is from my self (logged in account)
-func isFromMySelf(jid string) bool {
+func isFromMySelf(cli *whatsmeow.Client, jid string) bool {
 	return extractPhoneNumber(jid) == extractPhoneNumber(cli.Store.ID.String())
 }
 
@@ -462,8 +463,6 @@ func GetWhatsappTenantClient(clients *map[string]*WhatsAppTenantClient, user *Wh
 
 	// return nil, errors.New("WhatsApp Client is not active")
 }
-
-
 
 func WhatsAppGetUserAgent(agentType string) waCompanionReg.DeviceProps_PlatformType {
 	switch strings.ToLower(agentType) {
