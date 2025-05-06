@@ -81,10 +81,7 @@ func initEnvConfig() {
 	if envAutoReply := viper.GetString("WHATSAPP_AUTO_REPLY"); envAutoReply != "" {
 		config.WhatsappAutoReplyMessage = envAutoReply
 	}
-	if envWebhook := viper.GetString("WHATSAPP_WEBHOOK"); envWebhook != "" {
-		webhook := strings.Split(envWebhook, ",")
-		config.WhatsappWebhook = webhook
-	}
+
 	if envWebhookSecret := viper.GetString("WHATSAPP_WEBHOOK_SECRET"); envWebhookSecret != "" {
 		config.WhatsappWebhookSecret = envWebhookSecret
 	}
@@ -147,12 +144,12 @@ func initFlags() {
 		config.WhatsappAutoReplyMessage,
 		`auto reply when received message --autoreply <string> | example: --autoreply="Don't reply this message"`,
 	)
-	rootCmd.PersistentFlags().StringSliceVarP(
-		&config.WhatsappWebhook,
-		"webhook", "w",
-		config.WhatsappWebhook,
-		`forward event to webhook --webhook <string> | example: --webhook="https://yourcallback.com/callback"`,
-	)
+	// rootCmd.PersistentFlags().StringSliceVarP(
+	// 	&config.WhatsappWebhook,
+	// 	"webhook", "w",
+	// 	config.WhatsappWebhook,
+	// 	`forward event to webhook --webhook <string> | example: --webhook="https://yourcallback.com/callback"`,
+	// )
 	rootCmd.PersistentFlags().StringVarP(
 		&config.WhatsappWebhookSecret,
 		"webhook-secret", "",

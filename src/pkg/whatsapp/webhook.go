@@ -15,18 +15,22 @@ import (
 )
 
 // forwardToWebhook is a helper function to forward event to webhook url
-func forwardToWebhook(cli *whatsmeow.Client, evt *events.Message) error {
-	logrus.Info("Forwarding event to webhook:", config.WhatsappWebhook)
-	payload, err := createPayload(cli, evt)
+func forwardToWebhook(tenantClient *WhatsAppTenantClient, evt *events.Message) error {
+	logrus.Info("Forwarding event to webhook", tenantClient.User.WebhookURL)
+	payload, err := createPayload(tenantClient.Conn, evt)
 	if err != nil {
 		return err
 	}
 
-	for _, url := range config.WhatsappWebhook {
-		if err = submitWebhook(payload, url); err != nil {
-			return err
-		}
+	if err = submitWebhook(payload, tenantClient.User.WebhookURL); err != nil {
+		return err
 	}
+
+	// for _, url := range config.WhatsappWebhook {
+	// 	if err = submitWebhook(payload, url); err != nil {
+	// 		return err
+	// 	}
+	// }
 
 	logrus.Info("Event forwarded to webhook")
 	return nil

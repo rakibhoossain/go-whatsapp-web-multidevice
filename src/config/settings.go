@@ -22,7 +22,6 @@ var (
 	DBURI = "file:storages/whatsapp.db?_foreign_keys=on"
 
 	WhatsappAutoReplyMessage       string
-	WhatsappWebhook                []string
 	WhatsappWebhookSecret                = "secret"
 	WhatsappLogLevel                     = "ERROR"
 	WhatsappSettingMaxImageSize    int64 = 20000000  // 20MB

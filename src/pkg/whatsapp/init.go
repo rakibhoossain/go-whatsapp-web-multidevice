@@ -591,11 +591,11 @@ func handleWebhookForward(user *WhatsAppTenantUser, evt *events.Message) {
 		return
 	}
 
-	if len(config.WhatsappWebhook) > 0 &&
+	if len(user.WebhookURL) > 0 &&
 		!strings.Contains(evt.Info.SourceString(), "broadcast") &&
 		!isFromMySelf(tenantClient.Conn, evt.Info.SourceString()) {
 		go func(evt *events.Message) {
-			if err := forwardToWebhook(tenantClient.Conn, evt); err != nil {
+			if err := forwardToWebhook(tenantClient, evt); err != nil {
 				logrus.Error("Failed forward to webhook: ", err, " for token: ", user.UserToken)
 			}
 		}(evt)
