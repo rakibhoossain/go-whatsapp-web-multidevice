@@ -184,24 +184,24 @@ func getDeviceTokens(devices []*store.Device) map[string]*WhatsAppTenantUser {
 }
 
 // InitWaDB initializes the WhatsApp database connection
-func InitWaDB() *sqlstore.Container {
+func InitWaDB() (*sqlstore.Container, *sql.DB) {
 	log = waLog.Stdout("Main", config.WhatsappLogLevel, true)
 	dbLog := waLog.Stdout("Database", config.WhatsappLogLevel, true)
 
-	storeContainer, err := initDatabase(dbLog)
+	storeContainer, dbClient, err := initDatabase(dbLog)
 	if err != nil {
 		log.Errorf("Database initialization error: %v", err)
 		panic(pkgError.InternalServerError(fmt.Sprintf("Database initialization error: %v", err)))
 	}
 
-	return storeContainer
+	return storeContainer, dbClient
 }
 
 // initDatabase creates and returns a database store container based on the configured URI
-func initDatabase(dbLog waLog.Logger) (*sqlstore.Container, error) {
+func initDatabase(dbLog waLog.Logger) (*sqlstore.Container, *sql.DB, error) {
 	db, err := sql.Open("postgres", config.DBURI)
 	if err != nil {
-		return nil, fmt.Errorf("Error Connect WhatsApp Client Datastore: %w", err)
+		return nil, nil, fmt.Errorf("Error Connect WhatsApp Client Datastore: %w", err)
 	}
 
 	container := sqlstore.NewWithDB(db, "postgres", dbLog)
@@ -210,10 +210,10 @@ func initDatabase(dbLog waLog.Logger) (*sqlstore.Container, error) {
 
 	err = updateDatabase()
 	if err != nil {
-		return nil, fmt.Errorf("Failed to migrate db tables: %w", err)
+		return nil, nil, fmt.Errorf("Failed to migrate db tables: %w", err)
 	}
 
-	return container, nil
+	return container, Db, nil
 }
 
 func WhatsAppGenerateQR(qrChan <-chan whatsmeow.QRChannelItem) (string, int) {
@@ -471,16 +471,31 @@ func handleAppStateSyncComplete(user *WhatsAppTenantUser, evt *events.AppStateSy
 }
 
 func handlePairSuccess(user *WhatsAppTenantUser, evt *events.PairSuccess) {
-	websocket.Broadcast <- websocket.BroadcastMessage{
-		Code:    "LOGIN_SUCCESS",
-		Message: fmt.Sprintf("Successfully pair with %s", evt.ID.String()),
+	// Broadcast a message to all clients in "support-team" channel
+	websocket.Broadcast <- struct {
+		Channel string
+		Message websocket.BroadcastMessage
+	}{
+		Channel: user.UserToken,
+		Message: websocket.BroadcastMessage{
+			Code:    "LOGIN_SUCCESS",
+			Message: fmt.Sprintf("Successfully pair with %s", evt.ID.String()),
+			Result:  map[string]interface{}{"ticket_id": 12345},
+		},
 	}
 }
 
 func handleLoggedOut(user *WhatsAppTenantUser) {
-	websocket.Broadcast <- websocket.BroadcastMessage{
-		Code:   "LIST_DEVICES",
-		Result: nil,
+	// Broadcast a message to all clients in "support-team" channel
+	websocket.Broadcast <- struct {
+		Channel string
+		Message websocket.BroadcastMessage
+	}{
+		Channel: user.UserToken,
+		Message: websocket.BroadcastMessage{
+			Code:   "LIST_DEVICES",
+			Result: nil,
+		},
 	}
 }
 

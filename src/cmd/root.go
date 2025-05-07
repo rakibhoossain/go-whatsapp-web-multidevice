@@ -228,7 +228,7 @@ func runRest(_ *cobra.Command, _ []string) {
 	// 	}))
 	// }
 
-	db := whatsapp.InitWaDB()
+	db, dbClient := whatsapp.InitWaDB()
 	clients := whatsapp.Startup()
 
 	// Service
@@ -257,8 +257,10 @@ func runRest(_ *cobra.Command, _ []string) {
 		})
 	})
 
-	websocket.RegisterRoutes(app, appService)
+	// Start WebSocket hub
 	go websocket.RunHub()
+
+	websocket.RegisterRoutes(app, dbClient)
 
 	// Set auto reconnect to whatsapp server after booting
 	go helpers.SetAutoConnectAfterBooting(appService)
