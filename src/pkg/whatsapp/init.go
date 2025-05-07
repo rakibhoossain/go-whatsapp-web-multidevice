@@ -471,32 +471,18 @@ func handleAppStateSyncComplete(user *WhatsAppTenantUser, evt *events.AppStateSy
 }
 
 func handlePairSuccess(user *WhatsAppTenantUser, evt *events.PairSuccess) {
-	// Broadcast a message to all clients in "support-team" channel
-	websocket.Broadcast <- struct {
-		Channel string
-		Message websocket.BroadcastMessage
-	}{
-		Channel: user.UserToken,
-		Message: websocket.BroadcastMessage{
-			Code:    "LOGIN_SUCCESS",
-			Message: fmt.Sprintf("Successfully pair with %s", evt.ID.String()),
-			Result:  map[string]interface{}{"ticket_id": 12345},
-		},
-	}
+	sendWebsocketEvent(user, websocket.BroadcastMessage{
+		Code:    "LOGIN_SUCCESS",
+		Message: fmt.Sprintf("Successfully pair with %s", evt.ID.String()),
+	})
 }
 
 func handleLoggedOut(user *WhatsAppTenantUser) {
-	// Broadcast a message to all clients in "support-team" channel
-	websocket.Broadcast <- struct {
-		Channel string
-		Message websocket.BroadcastMessage
-	}{
-		Channel: user.UserToken,
-		Message: websocket.BroadcastMessage{
-			Code:   "LIST_DEVICES",
-			Result: nil,
-		},
-	}
+	sendWebsocketEvent(user, websocket.BroadcastMessage{
+		Code:    "LIST_DEVICES",
+		Message: fmt.Sprintf("Logged out"),
+		Result:  nil,
+	})
 }
 
 func handleConnectionEvents(user *WhatsAppTenantUser) {
@@ -545,6 +531,13 @@ func handleMessage(user *WhatsAppTenantUser, evt *events.Message) {
 
 	// Forward to webhook if configured
 	handleWebhookForward(user, evt)
+
+	// Send to webhook
+	sendWebsocketEvent(user, websocket.BroadcastMessage{
+		Code:    "INCOMMING_MESSAGE",
+		Message: fmt.Sprintf("Message received %s", evt.Info.ID),
+		Result:  map[string]interface{}{"message": message},
+	})
 }
 
 func buildMessageMetaParts(evt *events.Message) []string {
@@ -964,4 +957,14 @@ func GetWhatsAppUserWithToken(uuid string, clientName string, clientPassword str
 	user.UserToken = uuid
 
 	return &user, nil
+}
+
+func sendWebsocketEvent(user *WhatsAppTenantUser, message websocket.BroadcastMessage) {
+	websocket.Broadcast <- struct {
+		Channel string
+		Message websocket.BroadcastMessage
+	}{
+		Channel: user.UserToken,
+		Message: message,
+	}
 }
