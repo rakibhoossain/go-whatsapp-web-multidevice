@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"encoding/json"
-	"fmt"
 	"log"
 	"strings"
 	"sync"
@@ -111,12 +110,21 @@ func RunHub() {
 }
 
 // authenticateUser checks credentials against PostgreSQL
-func authenticateUser(db *sql.DB, token, password string) (bool, error) {
+func authenticateUser(db *sql.DB, username, password string) (bool, error) {
 
-	fmt.Println(token, password)
+	query := `
+		SELECT 
+			p.jid
+		FROM whatsmeow_device_client_pivot p
+		JOIN whatsmeow_clients c ON p.client_id = c.id
+		WHERE p.token = $1
+			AND p.secret_key = $2
+			AND c.status_code = 1
+		LIMIT 1
+	`
 
 	var hashedPassword string
-	err := db.QueryRow("SELECT token FROM whatsmeow_device_client_pivot WHERE token = $1", token).Scan(&hashedPassword)
+	err := db.QueryRow(query, username, password).Scan(&hashedPassword)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			return false, nil // User not found

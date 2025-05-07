@@ -690,6 +690,7 @@ func updateDatabase() error {
 		  client_id INTEGER NOT NULL,
 		  jid TEXT,
 		  token TEXT NOT NULL UNIQUE,
+		  secret_key TEXT NOT NULL,
 		  updated_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
 		  created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
 		  CONSTRAINT fk_client FOREIGN KEY (client_id) REFERENCES whatsmeow_clients(id) ON DELETE CASCADE
@@ -885,14 +886,14 @@ func ClientDelete(c *fiber.Ctx) error {
 	return utils.ResponseSuccess(c, "Client deleted successfully")
 }
 
-func GetWhatsAppUserWithToken(uuid string, clientName string, clientPassword string) (*WhatsAppTenantUser, error) {
+func GetWhatsAppUserWithToken(username string, password string) (*WhatsAppTenantUser, error) {
 	var (
 		user       WhatsAppTenantUser
 		jid        sql.NullString
 		webhookURL sql.NullString
 	)
 
-	query1 := `
+	query := `
 		SELECT 
 			p.jid, 
 			c.webhook_url, 
@@ -901,25 +902,12 @@ func GetWhatsAppUserWithToken(uuid string, clientName string, clientPassword str
 		FROM whatsmeow_device_client_pivot p
 		JOIN whatsmeow_clients c ON p.client_id = c.id
 		WHERE p.token = $1
-			AND c.uuid = $2
-			AND c.secret_key = $3
+			AND p.secret_key = $2
 			AND c.status_code = 1
 		LIMIT 1
 	`
 
-	query2 := `
-		SELECT 
-			c.webhook_url, 
-			c.status_code, 
-			c.id AS client_id
-		FROM whatsmeow_clients c
-		WHERE c.uuid = $1
-			AND c.secret_key = $2
-			AND c.status_code = 1
-		LIMIT 1
-	`
-
-	err := Db.QueryRow(query1, uuid, clientName, clientPassword).Scan(
+	err := Db.QueryRow(query, username, password).Scan(
 		&jid,
 		&webhookURL,
 		&user.StatusCode,
@@ -928,22 +916,9 @@ func GetWhatsAppUserWithToken(uuid string, clientName string, clientPassword str
 
 	if err != nil {
 		if err == sql.ErrNoRows {
-			// Try fallback query if no device-user match found
-			err = Db.QueryRow(query2, clientName, clientPassword).Scan(
-				&webhookURL,
-				&user.StatusCode,
-				&user.ClientId,
-			)
-			if err != nil {
-				if err == sql.ErrNoRows {
-					return nil, fmt.Errorf("user not found")
-				}
-				return nil, fmt.Errorf("database error: %w", err)
-			}
-			jid = sql.NullString{} // No device row means no JID
-		} else {
-			return nil, fmt.Errorf("database error: %w", err)
+			return nil, fmt.Errorf("User not found")
 		}
+		return nil, fmt.Errorf("User error: %w", err)
 	}
 
 	// Convert nullable fields to Go strings
@@ -954,7 +929,7 @@ func GetWhatsAppUserWithToken(uuid string, clientName string, clientPassword str
 		user.WebhookURL = webhookURL.String
 	}
 
-	user.UserToken = uuid
+	user.UserToken = username
 
 	return &user, nil
 }

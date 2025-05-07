@@ -20,11 +20,6 @@ func BasicAuth() fiber.Handler {
 		// Parse HTTP Header Authorization
 		authHeader := strings.SplitN(c.Get("Authorization"), " ", 2)
 
-		apiKey := c.Get("apiKey")
-		if apiKey == "" {
-			return utils.ResponseBadRequest(c, "required api key")
-		}
-
 		// Validate Authorization header
 		if len(authHeader) != 2 || authHeader[0] != "Basic" {
 			return utils.ResponseAuthenticate(c)
@@ -43,7 +38,7 @@ func BasicAuth() fiber.Handler {
 
 		username, password := authCredentials[0], authCredentials[1]
 
-		user, err := whatsapp.GetWhatsAppUserWithToken(apiKey, username, password)
+		user, err := whatsapp.GetWhatsAppUserWithToken(username, password)
 		if err != nil {
 			return utils.ResponseBadRequest(c, err.Error())
 		}
