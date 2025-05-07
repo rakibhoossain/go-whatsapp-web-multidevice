@@ -55,6 +55,7 @@ type evtMessage struct {
 }
 
 type WhatsAppTenantUser struct {
+	ID         string `json:"id"`
 	JID        string `json:"jid"`
 	UserToken  string `json:"token"`
 	WebhookURL string `json:"webhook_url"`
@@ -144,7 +145,7 @@ func getDeviceTokens(devices []*store.Device) map[string]*WhatsAppTenantUser {
 		}
 
 		query := fmt.Sprintf(`
-			SELECT p.jid, p.token, c.webhook_url, c.status_code, c.id AS client_id
+			SELECT p.id, p.jid, p.token, c.webhook_url, c.status_code, c.id AS client_id
 			FROM whatsmeow_device_client_pivot p
 			INNER JOIN whatsmeow_clients c ON p.client_id = c.id
 			WHERE p.jid IN (%s)
@@ -163,7 +164,7 @@ func getDeviceTokens(devices []*store.Device) map[string]*WhatsAppTenantUser {
 				var user WhatsAppTenantUser
 				var jid, webhookURL sql.NullString
 
-				if err := rows.Scan(&jid, &user.UserToken, &webhookURL, &user.StatusCode, &user.ClientId); err != nil {
+				if err := rows.Scan(&user.ID, &jid, &user.UserToken, &webhookURL, &user.StatusCode, &user.ClientId); err != nil {
 					goLog.Fatalln("Failed to scan pivot row: " + err.Error())
 					continue
 				}
@@ -519,6 +520,9 @@ func handleMessage(user *WhatsAppTenantUser, evt *events.Message) {
 		evt.Message,
 	)
 
+	// Store Message
+	StoreMessageOnDatabase(user, evt)
+
 	// Record the message
 	message := ExtractMessageText(evt)
 	utils.RecordMessage(evt.Info.ID, evt.Info.Sender.String(), message)
@@ -695,6 +699,42 @@ func updateDatabase() error {
 		  created_at TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,
 		  CONSTRAINT fk_client FOREIGN KEY (client_id) REFERENCES whatsmeow_clients(id) ON DELETE CASCADE
 		);
+
+		CREATE TABLE IF NOT EXISTS messages (
+			id SERIAL PRIMARY KEY,
+			user_reference_id INTEGER NOT NULL,
+			sender_jid TEXT,
+			chat_jid TEXT,
+			message_id TEXT UNIQUE NOT NULL,
+			timestamp TIMESTAMP NOT NULL,
+			message_type TEXT NOT NULL,
+			content TEXT,
+			media_url TEXT,
+			media_mime_type TEXT,
+			media_size INTEGER,
+			media_duration INTEGER,
+			media_caption TEXT,
+			media_thumbnail TEXT,
+			latitude DOUBLE PRECISION,
+			longitude DOUBLE PRECISION,
+			live_location_share_duration INTEGER,
+			live_location_final_latitude DOUBLE PRECISION,
+			live_location_final_longitude DOUBLE PRECISION,
+			status TEXT,
+			is_from_me BOOLEAN DEFAULT FALSE,
+			is_forwarded BOOLEAN DEFAULT FALSE,
+			forwarded_score INTEGER,
+			is_ephemeral BOOLEAN DEFAULT FALSE,
+			is_view_once BOOLEAN DEFAULT FALSE,
+			is_deleted BOOLEAN DEFAULT FALSE,
+			starred BOOLEAN DEFAULT FALSE,
+			created_at TIMESTAMP DEFAULT NOW(),
+			updated_at TIMESTAMP DEFAULT NOW(),
+			CONSTRAINT fk_user_reference_id FOREIGN KEY (user_reference_id) REFERENCES whatsmeow_device_client_pivot(id) ON DELETE CASCADE
+		);
+
+		CREATE UNIQUE INDEX IF NOT EXISTS message_id_chat_jid_index ON public.messages USING btree (message_id, chat_jid);
+
 	`)
 
 	return err
@@ -894,9 +934,10 @@ func GetWhatsAppUserWithToken(username string, password string) (*WhatsAppTenant
 	)
 
 	query := `
-		SELECT 
+		SELECT
+			p.id,
 			p.jid, 
-			c.webhook_url, 
+			c.webhook_url,
 			c.status_code, 
 			c.id AS client_id
 		FROM whatsmeow_device_client_pivot p
@@ -908,6 +949,7 @@ func GetWhatsAppUserWithToken(username string, password string) (*WhatsAppTenant
 	`
 
 	err := Db.QueryRow(query, username, password).Scan(
+		&user.ID,
 		&jid,
 		&webhookURL,
 		&user.StatusCode,

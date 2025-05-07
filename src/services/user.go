@@ -30,8 +30,7 @@ func NewUserService(clients *map[string]*whatsapp.WhatsAppTenantClient) domainUs
 }
 
 func (service userService) Info(c *fiber.Ctx, request domainUser.InfoRequest) (response domainUser.InfoResponse, err error) {
-	
-	
+
 	authPayload, err := auth.AuthPayload(c)
 	if err != nil {
 		return response, err
@@ -41,8 +40,7 @@ func (service userService) Info(c *fiber.Ctx, request domainUser.InfoRequest) (r
 	if err != nil {
 		return response, err
 	}
-	
-	
+
 	err = validations.ValidateUserInfo(c.UserContext(), request)
 	if err != nil {
 		return response, err
@@ -97,7 +95,6 @@ func (service userService) Avatar(c *fiber.Ctx, request domainUser.AvatarRequest
 		return response, err
 	}
 
-
 	chanResp := make(chan domainUser.AvatarResponse)
 	chanErr := make(chan error)
 	waktu := time.Now()
@@ -144,7 +141,7 @@ func (service userService) Avatar(c *fiber.Ctx, request domainUser.AvatarRequest
 }
 
 func (service userService) MyListGroups(c *fiber.Ctx) (response domainUser.MyListGroupsResponse, err error) {
-	
+
 	authPayload, err := auth.AuthPayload(c)
 	if err != nil {
 		return response, err
@@ -154,8 +151,7 @@ func (service userService) MyListGroups(c *fiber.Ctx) (response domainUser.MyLis
 	if err != nil {
 		return response, err
 	}
-	
-	
+
 	whatsapp.MustLogin(tenantClient.Conn)
 
 	groups, err := tenantClient.Conn.GetJoinedGroups()
@@ -170,7 +166,7 @@ func (service userService) MyListGroups(c *fiber.Ctx) (response domainUser.MyLis
 }
 
 func (service userService) MyListNewsletter(c *fiber.Ctx) (response domainUser.MyListNewsletterResponse, err error) {
-	
+
 	authPayload, err := auth.AuthPayload(c)
 	if err != nil {
 		return response, err
@@ -180,8 +176,7 @@ func (service userService) MyListNewsletter(c *fiber.Ctx) (response domainUser.M
 	if err != nil {
 		return response, err
 	}
-	
-	
+
 	whatsapp.MustLogin(tenantClient.Conn)
 
 	datas, err := tenantClient.Conn.GetSubscribedNewsletters()
@@ -196,8 +191,7 @@ func (service userService) MyListNewsletter(c *fiber.Ctx) (response domainUser.M
 }
 
 func (service userService) MyPrivacySetting(c *fiber.Ctx) (response domainUser.MyPrivacySettingResponse, err error) {
-	
-	
+
 	authPayload, err := auth.AuthPayload(c)
 	if err != nil {
 		return response, err
@@ -207,7 +201,7 @@ func (service userService) MyPrivacySetting(c *fiber.Ctx) (response domainUser.M
 	if err != nil {
 		return response, err
 	}
-	
+
 	whatsapp.MustLogin(tenantClient.Conn)
 
 	resp, err := tenantClient.Conn.TryFetchPrivacySettings(true)
@@ -223,8 +217,7 @@ func (service userService) MyPrivacySetting(c *fiber.Ctx) (response domainUser.M
 }
 
 func (service userService) MyListContacts(c *fiber.Ctx) (response domainUser.MyListContactsResponse, err error) {
-	
-	
+
 	authPayload, err := auth.AuthPayload(c)
 	if err != nil {
 		return response, err
@@ -234,8 +227,7 @@ func (service userService) MyListContacts(c *fiber.Ctx) (response domainUser.MyL
 	if err != nil {
 		return response, err
 	}
-	
-	
+
 	whatsapp.MustLogin(tenantClient.Conn)
 
 	contacts, err := tenantClient.Conn.Store.Contacts.GetAllContacts()
@@ -245,8 +237,11 @@ func (service userService) MyListContacts(c *fiber.Ctx) (response domainUser.MyL
 
 	for jid, contact := range contacts {
 		response.Data = append(response.Data, domainUser.MyListContactsResponseData{
-			JID:  jid,
-			Name: contact.FullName,
+			JID:          jid,
+			ChatID:       jid.User,
+			Name:         contact.FullName,
+			BusinessName: contact.BusinessName,
+			PushName:     contact.PushName,
 		})
 	}
 
@@ -254,8 +249,7 @@ func (service userService) MyListContacts(c *fiber.Ctx) (response domainUser.MyL
 }
 
 func (service userService) ChangeAvatar(c *fiber.Ctx, request domainUser.ChangeAvatarRequest) (err error) {
-	
-	
+
 	authPayload, err := auth.AuthPayload(c)
 	if err != nil {
 		return err
@@ -265,8 +259,7 @@ func (service userService) ChangeAvatar(c *fiber.Ctx, request domainUser.ChangeA
 	if err != nil {
 		return err
 	}
-	
-	
+
 	whatsapp.MustLogin(tenantClient.Conn)
 
 	file, err := request.Avatar.Open()
@@ -321,7 +314,7 @@ func (service userService) ChangeAvatar(c *fiber.Ctx, request domainUser.ChangeA
 }
 
 func (service userService) ChangePushName(c *fiber.Ctx, request domainUser.ChangePushNameRequest) (err error) {
-	
+
 	authPayload, err := auth.AuthPayload(c)
 	if err != nil {
 		return err
@@ -331,8 +324,7 @@ func (service userService) ChangePushName(c *fiber.Ctx, request domainUser.Chang
 	if err != nil {
 		return err
 	}
-	
-	
+
 	whatsapp.MustLogin(tenantClient.Conn)
 
 	err = tenantClient.Conn.SendAppState(appstate.BuildSettingPushName(request.PushName))

@@ -66,8 +66,11 @@ type MyListContactsResponse struct {
 }
 
 type MyListContactsResponseData struct {
-	JID  types.JID `json:"jid"`
-	Name string    `json:"name"`
+	JID          types.JID `json:"jid"`
+	ChatID       string    `json:"chat_id"`
+	Name         string    `json:"name"`
+	BusinessName string    `json:"business_name"`
+	PushName     string    `json:"push_name"`
 }
 
 type ChangePushNameRequest struct {
