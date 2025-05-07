@@ -14,6 +14,7 @@ type Message struct {
 
 func InitRestMessage(app *fiber.App, service domainMessage.IMessageService) Message {
 	rest := Message{Service: service}
+	app.Get("/message/chat/:chat_id/messages", auth.BasicAuth(), rest.GetAllChatMessage)
 	app.Post("/message/:message_id/reaction", auth.BasicAuth(), rest.ReactMessage)
 	app.Post("/message/:message_id/revoke", auth.BasicAuth(), rest.RevokeMessage)
 	app.Post("/message/:message_id/delete", auth.BasicAuth(), rest.DeleteMessage)
@@ -77,6 +78,21 @@ func (controller *Message) UpdateMessage(c *fiber.Ctx) error {
 		Status:  200,
 		Code:    "SUCCESS",
 		Message: response.Status,
+		Results: response,
+	})
+}
+
+func (controller *Message) GetAllChatMessage(c *fiber.Ctx) error {
+	var request domainMessage.ChatMessageRequest
+	request.ChatID = c.Params("chat_id")
+
+	response, err := controller.Service.GetAllChatMessage(c, request)
+	utils.PanicIfNeeded(err)
+
+	return c.JSON(utils.ResponseData{
+		Status:  200,
+		Code:    "SUCCESS",
+		Message: "Fetch messages",
 		Results: response,
 	})
 }

@@ -66,6 +66,76 @@ func (service serviceMessage) MarkAsRead(c *fiber.Ctx, request domainMessage.Mar
 	return response, nil
 }
 
+func (service serviceMessage) GetAllChatMessage(c *fiber.Ctx, request domainMessage.ChatMessageRequest) (response domainMessage.ChatMessageResponse, err error) {
+	// Authentication
+	authPayload, err := auth.AuthPayload(c)
+	if err != nil {
+		return response, fmt.Errorf("authentication failed: %w", err)
+	}
+
+	_, err = whatsapp.GetWhatsappTenantClient(service.Clients, authPayload.User)
+	if err != nil {
+		return response, fmt.Errorf("whatsapp client error: %w", err)
+	}
+
+	// Build query with pagination
+	query := `
+        SELECT 
+            m.id, 
+            m.sender_jid, 
+            m.timestamp, 
+            m.content,
+			m.is_from_me
+        FROM messages m
+        WHERE m.chat_jid = $1
+        ORDER BY m.timestamp DESC
+        LIMIT $2 OFFSET $3
+    `
+
+	// Set default pagination values if not provided
+	if request.Limit <= 0 {
+		request.Limit = 50 // Default page size
+	}
+	if request.Offset < 0 {
+		request.Offset = 0
+	}
+
+	rows, err := whatsapp.Db.Query(query, request.ChatID, request.Limit, request.Offset)
+	if err != nil {
+		return response, fmt.Errorf("database query failed: %w", err)
+	}
+	defer rows.Close()
+
+	messages := []domainMessage.Message{}
+	for rows.Next() {
+		var msg domainMessage.Message
+
+		err := rows.Scan(
+			&msg.ID,
+			&msg.SenderJID,
+			&msg.Timestamp,
+			&msg.Content,
+			&msg.IsFromMe,
+		)
+		if err != nil {
+			fmt.Printf("Failed to scan message row: %v", err)
+			continue
+		}
+
+		messages = append(messages, msg)
+	}
+
+	// Check for any iteration errors
+	if err = rows.Err(); err != nil {
+		return response, fmt.Errorf("row iteration error: %w", err)
+	}
+
+	response.Data = messages
+	response.ChatID = request.ChatID
+
+	return response, nil
+}
+
 func (service serviceMessage) ReactMessage(c *fiber.Ctx, request domainMessage.ReactionRequest) (response domainMessage.GenericResponse, err error) {
 
 	authPayload, err := auth.AuthPayload(c)

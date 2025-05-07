@@ -5,6 +5,7 @@ import (
 )
 
 type IMessageService interface {
+	GetAllChatMessage(c *fiber.Ctx, request ChatMessageRequest) (response ChatMessageResponse, err error)
 	MarkAsRead(c *fiber.Ctx, request MarkAsReadRequest) (response GenericResponse, err error)
 	ReactMessage(c *fiber.Ctx, request ReactionRequest) (response GenericResponse, err error)
 	RevokeMessage(c *fiber.Ctx, request RevokeRequest) (response GenericResponse, err error)
@@ -32,6 +33,25 @@ type ReactionRequest struct {
 	MessageID string `json:"message_id" form:"message_id"`
 	Phone     string `json:"phone" form:"phone"`
 	Emoji     string `json:"emoji" form:"emoji"`
+}
+
+type ChatMessageRequest struct {
+	ChatID string `json:"chat_id" uri:"chat_id"`
+	Limit  int    `json:"limit" uri:"limit"`
+	Offset int    `json:"offset" uri:"offset"`
+}
+
+type ChatMessageResponse struct {
+	ChatID string `json:"chat_id"`
+	Data   any    `json:"data"`
+}
+
+type Message struct {
+	ID        int    `json:"id"`
+	SenderJID string `json:"sender_jid"`
+	Timestamp string `json:"timestamp"`
+	Content   string `json:"content"`
+	IsFromMe  bool   `json:"is_from_me"`
 }
 
 type UpdateMessageRequest struct {
