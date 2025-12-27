@@ -45,4 +45,10 @@ var (
 	ChatStorageURI               = "file:storages/chatstorage.db"
 	ChatStorageEnableForeignKeys = true
 	ChatStorageEnableWAL         = true
+
+	// Campaign settings
+	CampaignMinDelay     = 30  // Minimum delay between messages in seconds
+	CampaignMaxDelay     = 300 // Maximum delay between messages in seconds (5 min)
+	CampaignBatchSize    = 100 // Messages per queue poll
+	CampaignShortURLBase = ""  // Base URL for short links (e.g., https://yourdomain.com)
 )

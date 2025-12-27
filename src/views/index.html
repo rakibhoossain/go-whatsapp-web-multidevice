@@ -164,6 +164,17 @@
         <chat-messages></chat-messages>
     </div>
 
+    <div class="ui horizontal divider">
+        Campaign
+    </div>
+
+    <div class="ui three column doubling grid cards">
+        <campaign-customers></campaign-customers>
+        <campaign-groups></campaign-groups>
+        <campaign-templates></campaign-templates>
+        <campaign-list></campaign-list>
+    </div>
+
 </div>
 <script>
     window.TYPEGROUP = "@g.us";
@@ -247,6 +258,10 @@
     import ChatList from "{{ .AppBasePath }}/components/ChatList.js";
     import ChatMessages from "{{ .AppBasePath }}/components/ChatMessages.js";
     import DeviceManager from "{{ .AppBasePath }}/components/DeviceManager.js";
+    import CampaignCustomers from "{{ .AppBasePath }}/components/CampaignCustomers.js";
+    import CampaignGroups from "{{ .AppBasePath }}/components/CampaignGroups.js";
+    import CampaignTemplates from "{{ .AppBasePath }}/components/CampaignTemplates.js";
+    import CampaignList from "{{ .AppBasePath }}/components/CampaignList.js";
 
     const showErrorInfo = (message) => {
         $('body').toast({
@@ -276,7 +291,8 @@
             NewsletterList,
             AccountAvatar, AccountUserInfo, AccountPrivacy, AccountChangeAvatar, AccountContact, AccountChangePushName, AccountUserCheck, AccountBusinessProfile,
             ChatPinManager, ChatDisappearingManager, ChatList, ChatMessages,
-            DeviceManager
+            DeviceManager,
+            CampaignCustomers, CampaignGroups, CampaignTemplates, CampaignList
         },
         delimiters: ['[[', ']]'],
         data() {

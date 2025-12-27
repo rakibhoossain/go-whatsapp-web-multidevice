@@ -13,6 +13,7 @@ import (
 
 	"github.com/aldinokemal/go-whatsapp-web-multidevice/config"
 	domainApp "github.com/aldinokemal/go-whatsapp-web-multidevice/domains/app"
+	domainCampaign "github.com/aldinokemal/go-whatsapp-web-multidevice/domains/campaign"
 	domainChat "github.com/aldinokemal/go-whatsapp-web-multidevice/domains/chat"
 	domainChatStorage "github.com/aldinokemal/go-whatsapp-web-multidevice/domains/chatstorage"
 	domainDevice "github.com/aldinokemal/go-whatsapp-web-multidevice/domains/device"
@@ -21,6 +22,7 @@ import (
 	domainNewsletter "github.com/aldinokemal/go-whatsapp-web-multidevice/domains/newsletter"
 	domainSend "github.com/aldinokemal/go-whatsapp-web-multidevice/domains/send"
 	domainUser "github.com/aldinokemal/go-whatsapp-web-multidevice/domains/user"
+	campaignInfra "github.com/aldinokemal/go-whatsapp-web-multidevice/infrastructure/campaign"
 	"github.com/aldinokemal/go-whatsapp-web-multidevice/infrastructure/chatstorage"
 	"github.com/aldinokemal/go-whatsapp-web-multidevice/infrastructure/whatsapp"
 	"github.com/aldinokemal/go-whatsapp-web-multidevice/pkg/utils"
@@ -53,6 +55,7 @@ var (
 	groupUsecase      domainGroup.IGroupUsecase
 	newsletterUsecase domainNewsletter.INewsletterUsecase
 	deviceUsecase     domainDevice.IDeviceUsecase
+	campaignUsecase   domainCampaign.ICampaignUsecase
 )
 
 // rootCmd represents the base command when called without any subcommands
@@ -324,6 +327,15 @@ func initApp() {
 	groupUsecase = usecase.NewGroupService()
 	newsletterUsecase = usecase.NewNewsletterService()
 	deviceUsecase = usecase.NewDeviceService(dm)
+
+	// Campaign module
+	campaignRepo := campaignInfra.NewRepository(chatStorageDB)
+	if err := campaignRepo.InitializeSchema(); err != nil {
+		logrus.Warnf("failed to initialize campaign schema: %v", err)
+	} else {
+		campaignUsecase = usecase.NewCampaignService(campaignRepo, sendUsecase, config.AppBasePath)
+		logrus.Info("Campaign module initialized")
+	}
 }
 
 // Execute adds all child commands to the root command and sets flags appropriately.

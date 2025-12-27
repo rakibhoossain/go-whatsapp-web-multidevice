@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"strings"
@@ -108,6 +109,10 @@ func restServer(_ *cobra.Command, _ []string) {
 		rest.InitRestGroup(r, groupUsecase)
 		rest.InitRestNewsletter(r, newsletterUsecase)
 		websocket.RegisterRoutes(r, appUsecase)
+		// Campaign module
+		if campaignUsecase != nil {
+			rest.InitRestCampaign(r, campaignUsecase)
+		}
 	}
 
 	// Device management routes (no device_id required)
@@ -135,6 +140,13 @@ func restServer(_ *cobra.Command, _ []string) {
 
 	// Set auto reconnect checking with a guaranteed client instance
 	startAutoReconnectCheckerIfClientAvailable()
+
+	// Start campaign queue worker
+	if campaignUsecase != nil {
+		go campaignUsecase.StartQueueWorker(context.Background())
+		go campaignUsecase.StartValidationWorker(context.Background())
+		logrus.Info("Campaign queue worker started")
+	}
 
 	if err := app.Listen(config.AppHost + ":" + config.AppPort); err != nil {
 		logrus.Fatalln("Failed to start: ", err.Error())

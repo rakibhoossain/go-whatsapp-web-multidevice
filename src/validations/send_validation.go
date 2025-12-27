@@ -487,3 +487,7 @@ func ValidateSendChatPresence(ctx context.Context, request domainSend.ChatPresen
 
 	return nil
 }
+
+func ValidatePhoneNumber(phone string) error {
+	return validatePhoneNumber(phone)
+}
