@@ -82,49 +82,62 @@ func (service serviceUser) Avatar(ctx context.Context, request domainUser.Avatar
 		return response, pkgError.ErrWaCLI
 	}
 
-	chanResp := make(chan domainUser.AvatarResponse)
-	chanErr := make(chan error)
-	waktu := time.Now()
+	err = validations.ValidateUserAvatar(ctx, request)
+	if err != nil {
+		return response, err
+	}
 
-	go func() {
-		err = validations.ValidateUserAvatar(ctx, request)
-		if err != nil {
-			chanErr <- err
-		}
-		dataWaRecipient, err := utils.ValidateJidWithLogin(client, request.Phone)
-		if err != nil {
-			chanErr <- err
-		}
-		pic, err := client.GetProfilePictureInfo(ctx, dataWaRecipient, &whatsmeow.GetProfilePictureParams{
-			Preview:     request.IsPreview,
-			IsCommunity: request.IsCommunity,
-		})
-		if err != nil {
-			chanErr <- err
-		} else if pic == nil {
-			chanErr <- errors.New("no avatar found")
-		} else {
-			response.URL = pic.URL
-			response.ID = pic.ID
-			response.Type = pic.Type
+	dataWaRecipient, err := utils.ValidateJidWithLogin(client, request.Phone)
+	if err != nil {
+		return response, err
+	}
 
-			chanResp <- response
-		}
-	}()
+	// IsCommunity should only be true for group JIDs (communities)
+	// For regular user JIDs (@s.whatsapp.net), force IsCommunity to false to prevent timeout
+	isCommunity := request.IsCommunity
+	if dataWaRecipient.Server == types.DefaultUserServer {
+		isCommunity = false
+	}
 
-	for {
-		select {
-		case err := <-chanErr:
-			return response, err
-		case response := <-chanResp:
-			return response, nil
-		default:
-			if waktu.Add(2 * time.Second).Before(time.Now()) {
-				return response, pkgError.ContextError("Error timeout get avatar !")
+	avatarCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	pic, err := client.GetProfilePictureInfo(avatarCtx, dataWaRecipient, &whatsmeow.GetProfilePictureParams{
+		Preview:     request.IsPreview,
+		IsCommunity: isCommunity,
+	})
+	if err != nil {
+		if avatarCtx.Err() == context.DeadlineExceeded {
+			return response, pkgError.ContextError("Error timeout get avatar!")
+		}
+		// If is_community=true failed, retry with is_community=false as fallback
+		if isCommunity {
+			avatarCtx2, cancel2 := context.WithTimeout(ctx, 5*time.Second)
+			defer cancel2()
+
+			pic, err = client.GetProfilePictureInfo(avatarCtx2, dataWaRecipient, &whatsmeow.GetProfilePictureParams{
+				Preview:     request.IsPreview,
+				IsCommunity: false,
+			})
+			if err != nil {
+				if avatarCtx2.Err() == context.DeadlineExceeded {
+					return response, pkgError.ContextError("Error timeout get avatar!")
+				}
+				return response, err
 			}
+		} else {
+			return response, err
 		}
 	}
 
+	if pic == nil {
+		return response, errors.New("no avatar found")
+	}
+
+	response.URL = pic.URL
+	response.ID = pic.ID
+	response.Type = pic.Type
+	return response, nil
 }
 
 func (service serviceUser) MyListGroups(ctx context.Context) (response domainUser.MyListGroupsResponse, err error) {

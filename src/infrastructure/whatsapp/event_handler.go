@@ -55,6 +55,16 @@ func handler(ctx context.Context, instance *DeviceInstance, rawEvt any) {
 		handleAppState(ctx, evt)
 	case *events.GroupInfo:
 		handleGroupInfo(ctx, evt, instance.JID(), client)
+	case *events.JoinedGroup:
+		handleJoinedGroup(ctx, evt, instance.JID(), client)
+	case *events.NewsletterJoin:
+		handleNewsletterJoin(ctx, evt, instance.JID(), client)
+	case *events.NewsletterLeave:
+		handleNewsletterLeave(ctx, evt, instance.JID(), client)
+	case *events.NewsletterLiveUpdate:
+		handleNewsletterLiveUpdate(ctx, evt, instance.JID(), client)
+	case *events.NewsletterMuteChange:
+		handleNewsletterMuteChange(ctx, evt, instance.JID(), client)
 	}
 
 	instance.UpdateStateFromClient()
@@ -130,10 +140,14 @@ func handleLoggedOut(ctx context.Context, instance *DeviceInstance, chatStorageR
 		}
 	}
 
+	deviceID := instance.ID()
+
+	instance.TriggerLoggedOut()
+
 	websocket.Broadcast <- websocket.BroadcastMessage{
 		Code:    "LOGOUT_COMPLETE",
-		Message: "Remote logout cleanup completed - ready for new login",
-		Result:  map[string]string{"device_id": instance.ID()},
+		Message: "Remote logout cleanup completed - device removed from server",
+		Result:  map[string]string{"device_id": deviceID},
 	}
 }
 
