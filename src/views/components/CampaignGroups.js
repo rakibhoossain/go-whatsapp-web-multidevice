@@ -70,6 +70,9 @@ export default {
                 const response = await window.http.get(url);
                 const newCustomers = response.data.results.customers || [];
 
+                // Transform customers for readiness if needed (though API sends is_ready)
+                // We rely on API's is_ready which checks phone_valid && whatsapp_exists
+
                 if (newCustomers.length < 20) {
                     this.customersHasMore = false;
                 }
@@ -113,10 +116,26 @@ export default {
         },
         async bulkAdd() {
             if (this.bulkSelectedIds.length === 0 || !this.selectedGroup) return;
+
+            // Filter only valid customers
+            const validIds = this.bulkSelectedIds.filter(id => {
+                const customer = this.customers.find(c => c.id === id);
+                return customer && customer.is_ready;
+            });
+
+            if (validIds.length === 0) {
+                showErrorInfo('No valid customers selected (must be phone valid & on WhatsApp)');
+                return;
+            }
+
+            if (validIds.length < this.bulkSelectedIds.length) {
+                if (!confirm(`Only ${validIds.length} of ${this.bulkSelectedIds.length} selected customers are valid. Proceed?`)) return;
+            }
+
             try {
                 this.bulkLoading = true;
                 await window.http.post(`/campaign/groups/${this.selectedGroup.id}/members`, {
-                    customer_ids: this.bulkSelectedIds
+                    customer_ids: validIds
                 });
                 showSuccessInfo('Customers added to group');
                 this.bulkSelectedIds = [];
@@ -234,37 +253,56 @@ export default {
             this.searchQuery = ''; // Reset search on open
             this.filterMode = 'all';
             this.bulkSelectedIds = [];
+            this.customers = []; // Clear previous list
+            this.customersLoading = false; // Reset loading state just in case
+            this.customersPage = 1;
+            this.customersHasMore = true;
 
+            $('#modalCampaignGroupMembers').modal({
+                detachable: true, // Revert to true for layout fix
+                observeChanges: true,
+                onHidden: () => {
+                    this.customers = [];
+                }
+            }).modal('show');
+
+            // Load after show to visual flicker or before? Before is better for UX, but if it fails silently...
+            // Let's await it.
             await this.loadCustomers(true);
+
             const response = await window.http.get(`/campaign/groups/${group.id}`);
             const groupData = response.data.results;
             this.selectedCustomerIds = (groupData.customers || []).map(c => c.id);
-            $('#modalCampaignGroupMembers').modal('show');
         },
         isCustomerInGroup(customerId) {
             return this.selectedCustomerIds.includes(customerId);
         },
-        async toggleCustomer(customerId) {
+        async toggleCustomer(customer) {
             if (!this.selectedGroup) return;
 
-            const isMember = this.selectedCustomerIds.includes(customerId);
+            const isMember = this.selectedCustomerIds.includes(customer.id);
+
+            if (!isMember && !customer.is_ready) {
+                showErrorInfo('Cannot add invalid customer (must be phone valid & on WhatsApp)');
+                return;
+            }
 
             // Optimistic update
             if (isMember) {
-                const index = this.selectedCustomerIds.indexOf(customerId);
+                const index = this.selectedCustomerIds.indexOf(customer.id);
                 this.selectedCustomerIds.splice(index, 1);
             } else {
-                this.selectedCustomerIds.push(customerId);
+                this.selectedCustomerIds.push(customer.id);
             }
 
             try {
                 if (isMember) {
                     // Remove member
-                    await window.http.delete(`/campaign/groups/${this.selectedGroup.id}/members/${customerId}`);
+                    await window.http.delete(`/campaign/groups/${this.selectedGroup.id}/members/${customer.id}`);
                 } else {
                     // Add member
                     await window.http.post(`/campaign/groups/${this.selectedGroup.id}/members`, {
-                        customer_ids: [customerId]
+                        customer_ids: [customer.id]
                     });
                 }
 
@@ -286,13 +324,20 @@ export default {
             } catch (error) {
                 // Revert update on error
                 if (isMember) {
-                    this.selectedCustomerIds.push(customerId);
+                    this.selectedCustomerIds.push(customer.id);
                 } else {
-                    const index = this.selectedCustomerIds.indexOf(customerId);
+                    const index = this.selectedCustomerIds.indexOf(customer.id);
                     this.selectedCustomerIds.splice(index, 1);
                 }
                 showErrorInfo(error.response?.data?.message || error.message);
             }
+        },
+        getStatusColor(status) {
+            return {
+                'pending': 'grey',
+                'valid': 'green',
+                'invalid': 'red'
+            }[status] || 'grey';
         },
         nextPage() {
             if (this.page < this.totalPages) {
@@ -403,7 +448,6 @@ export default {
             <div class="ui info message">
                 <p>Select customers to add to this group:</p>
             </div>
-            </div>
             
             <div class="ui grid" style="margin-bottom: 10px">
                 <div class="eight wide column">
@@ -445,23 +489,34 @@ export default {
                     </div>
                 </div>
                 <div class="item" v-for="customer in customers" :key="customer.id" 
-                     @click="toggleCustomer(customer.id)" style="cursor: pointer">
+                     @click="toggleCustomer(customer)" style="cursor: pointer" :class="{disabled: !customer.is_ready && !isCustomerInGroup(customer.id)}">
                     <div class="left floated content" style="margin-right: 10px;">
-                        <div class="ui checkbox" @click.stop>
-                            <input type="checkbox" :checked="bulkSelectedIds.includes(customer.id)" @change="toggleBulkSelect(customer.id)">
+                        <div class="ui checkbox" @click.stop :class="{disabled: !customer.is_ready}">
+                            <input type="checkbox" :checked="bulkSelectedIds.includes(customer.id)" @change="toggleBulkSelect(customer.id)" :disabled="!customer.is_ready">
                             <label></label>
                         </div>
                     </div>
                     <div class="right floated content">
-                        <div class="ui toggle checkbox">
-                            <input type="checkbox" :checked="isCustomerInGroup(customer.id)" @click.stop="toggleCustomer(customer.id)">
+                        <div class="ui toggle checkbox" :class="{disabled: !customer.is_ready && !isCustomerInGroup(customer.id)}">
+                            <input type="checkbox" :checked="isCustomerInGroup(customer.id)" @click.stop="toggleCustomer(customer)" :disabled="!customer.is_ready && !isCustomerInGroup(customer.id)">
                             <label></label>
                         </div>
                     </div>
                     <i class="large user circle icon"></i>
                     <div class="content">
-                        <div class="header">{{ customer.full_name || customer.phone }}</div>
-                        <div class="description">{{ customer.phone }}</div>
+                        <div class="header">
+                            {{ customer.full_name || customer.phone }}
+                            <div class="ui horizontal labels" style="margin-left: 5px">
+                                <span v-if="customer.is_ready" class="ui mini green label">Ready</span>
+                                <span v-else class="ui mini red label">Invalid</span>
+                            </div>
+                        </div>
+                        <div class="description">
+                            {{ customer.phone }} 
+                            <span v-if="!customer.is_ready" style="font-size: 0.8em; color: #db2828;">
+                                (Phone: {{ customer.phone_valid }}, WA: {{ customer.whatsapp_exists }})
+                            </span>
+                        </div>
                     </div>
                 </div>
             </div>

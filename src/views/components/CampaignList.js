@@ -207,12 +207,16 @@ export default {
             if (!date) return '-';
             return new Date(date).toLocaleString();
         },
-        toggleCustomer(customerId) {
-            const index = this.form.customer_ids.indexOf(customerId);
+        toggleCustomer(customer) {
+            if (!customer.is_ready) {
+                showErrorInfo('Cannot add invalid customer (must be phone valid & on WhatsApp)');
+                return;
+            }
+            const index = this.form.customer_ids.indexOf(customer.id);
             if (index > -1) {
                 this.form.customer_ids.splice(index, 1);
             } else {
-                this.form.customer_ids.push(customerId);
+                this.form.customer_ids.push(customer.id);
             }
         },
         toggleGroup(groupId) {
@@ -442,10 +446,10 @@ export default {
                         </div>
                         <div class="ui middle aligned divided selection list" style="max-height: 200px; overflow-y: auto" @scroll="handleCustomerScroll">
                             <div class="item" v-for="customer in customers" :key="customer.id" 
-                                 @click="toggleCustomer(customer.id)" style="cursor: pointer">
+                                 @click="toggleCustomer(customer)" style="cursor: pointer" :class="{disabled: !customer.is_ready && !form.customer_ids.includes(customer.id)}">
                                 <div class="right floated content">
-                                    <div class="ui checkbox">
-                                        <input type="checkbox" :checked="form.customer_ids.includes(customer.id)">
+                                    <div class="ui checkbox" :class="{disabled: !customer.is_ready}">
+                                        <input type="checkbox" :checked="form.customer_ids.includes(customer.id)" :disabled="!customer.is_ready">
                                         <label></label>
                                     </div>
                                 </div>
@@ -453,6 +457,13 @@ export default {
                                 <div class="content">
                                     {{ customer.full_name || customer.phone }} 
                                     <small v-if="customer.full_name">({{ customer.phone }})</small>
+                                    <div class="ui horizontal labels" style="margin-left: 5px">
+                                        <span v-if="customer.is_ready" class="ui mini green label">Ready</span>
+                                        <span v-else class="ui mini red label">Invalid</span>
+                                    </div>
+                                    <div v-if="!customer.is_ready" style="font-size: 0.8em; color: #db2828;">
+                                        Phone: {{ customer.phone_valid }}, WA: {{ customer.whatsapp_exists }}
+                                    </div>
                                 </div>
                             </div>
                         </div>
