@@ -11,17 +11,23 @@ export default {
                 description: ''
             },
             editingId: null,
-            selectedCustomerIds: [],
-            page: 1,
-            pageSize: 10,
             total: 0,
             searchQuery: '',
-            searchTimeout: null
+            searchTimeout: null,
+            customersPage: 1,
+            customersLoading: false,
+            customersHasMore: true,
+            filterMode: 'all', // all, member, non_member
+            bulkSelectedIds: [],
+            bulkLoading: false
         }
     },
     computed: {
         totalPages() {
             return Math.ceil(this.total / this.pageSize);
+        },
+        isAllSelected() {
+            return this.customers.length > 0 && this.customers.every(c => this.bulkSelectedIds.includes(c.id));
         }
     },
     methods: {
@@ -41,22 +47,133 @@ export default {
                 this.loading = false;
             }
         },
-        async loadCustomers() {
+        async loadCustomers(reset = false) {
+            if (this.customersLoading) return;
+
+            if (reset) {
+                this.customersPage = 1;
+                this.customers = [];
+                this.customersHasMore = true;
+            }
+
+            if (!this.customersHasMore) return;
+
             try {
-                let url = '/campaign/customers?page_size=1000';
+                this.customersLoading = true;
+                let url = `/campaign/customers?page=${this.customersPage}&page_size=20`;
                 if (this.searchQuery) {
                     url += `&search=${encodeURIComponent(this.searchQuery)}`;
                 }
+                if (this.filterMode !== 'all' && this.selectedGroup) {
+                    url += `&filter_group_id=${this.selectedGroup.id}&filter_type=${this.filterMode}`;
+                }
                 const response = await window.http.get(url);
-                this.customers = response.data.results.customers || [];
+                const newCustomers = response.data.results.customers || [];
+
+                if (newCustomers.length < 20) {
+                    this.customersHasMore = false;
+                }
+
+                if (reset) {
+                    this.customers = newCustomers;
+                } else {
+                    this.customers = [...this.customers, ...newCustomers];
+                }
+                this.customersPage++;
             } catch (error) {
                 console.error('Failed to load customers:', error);
+            } finally {
+                this.customersLoading = false;
+            }
+        },
+        handleScroll(e) {
+            const { scrollTop, scrollHeight, clientHeight } = e.target;
+            if (scrollTop + clientHeight >= scrollHeight - 50) {
+                this.loadCustomers();
+            }
+        },
+        async changeFilter() {
+            this.customersPage = 1;
+            await this.loadCustomers(true);
+        },
+        toggleBulkSelect(customerId) {
+            const index = this.bulkSelectedIds.indexOf(customerId);
+            if (index > -1) {
+                this.bulkSelectedIds.splice(index, 1);
+            } else {
+                this.bulkSelectedIds.push(customerId);
+            }
+        },
+        toggleSelectAll() {
+            if (this.isAllSelected) {
+                this.bulkSelectedIds = [];
+            } else {
+                this.bulkSelectedIds = this.customers.map(c => c.id);
+            }
+        },
+        async bulkAdd() {
+            if (this.bulkSelectedIds.length === 0 || !this.selectedGroup) return;
+            try {
+                this.bulkLoading = true;
+                await window.http.post(`/campaign/groups/${this.selectedGroup.id}/members`, {
+                    customer_ids: this.bulkSelectedIds
+                });
+                showSuccessInfo('Customers added to group');
+                this.bulkSelectedIds = [];
+
+                // Refresh data
+                await this.refreshGroupData();
+                if (this.filterMode === 'non_member') {
+                    await this.loadCustomers(true);
+                }
+            } catch (error) {
+                showErrorInfo(error.response?.data?.message || error.message);
+            } finally {
+                this.bulkLoading = false;
+            }
+        },
+        async bulkRemove() {
+            if (this.bulkSelectedIds.length === 0 || !this.selectedGroup) return;
+            if (!confirm(`Remove ${this.bulkSelectedIds.length} customers from group?`)) return;
+
+            try {
+                this.bulkLoading = true;
+                // Since we don't have bulk delete API, we loop. 
+                // In production with large lists, a bulk delete endpoint is better.
+                const promises = this.bulkSelectedIds.map(id =>
+                    window.http.delete(`/campaign/groups/${this.selectedGroup.id}/members/${id}`)
+                );
+                await Promise.all(promises);
+
+                showSuccessInfo('Customers removed from group');
+                this.bulkSelectedIds = [];
+
+                // Refresh data
+                await this.refreshGroupData();
+                if (this.filterMode === 'member') {
+                    await this.loadCustomers(true);
+                }
+            } catch (error) {
+                showErrorInfo(error.response?.data?.message || error.message);
+            } finally {
+                this.bulkLoading = false;
+            }
+        },
+        async refreshGroupData() {
+            const response = await window.http.get(`/campaign/groups/${this.selectedGroup.id}`);
+            const groupData = response.data.results;
+            this.selectedCustomerIds = (groupData.customers || []).map(c => c.id);
+
+            // Update group list count
+            const group = this.groups.find(g => g.id === this.selectedGroup.id);
+            if (group) {
+                group.customer_count = this.selectedCustomerIds.length;
             }
         },
         handleSearch() {
             clearTimeout(this.searchTimeout);
             this.searchTimeout = setTimeout(() => {
-                this.loadCustomers();
+                this.loadCustomers(true);
             }, 500);
         },
         openCreateModal() {
@@ -115,7 +232,10 @@ export default {
         async openMembersModal(group) {
             this.selectedGroup = group;
             this.searchQuery = ''; // Reset search on open
-            await this.loadCustomers();
+            this.filterMode = 'all';
+            this.bulkSelectedIds = [];
+
+            await this.loadCustomers(true);
             const response = await window.http.get(`/campaign/groups/${group.id}`);
             const groupData = response.data.results;
             this.selectedCustomerIds = (groupData.customers || []).map(c => c.id);
@@ -124,28 +244,54 @@ export default {
         isCustomerInGroup(customerId) {
             return this.selectedCustomerIds.includes(customerId);
         },
-        toggleCustomer(customerId) {
-            const index = this.selectedCustomerIds.indexOf(customerId);
-            if (index > -1) {
+        async toggleCustomer(customerId) {
+            if (!this.selectedGroup) return;
+
+            const isMember = this.selectedCustomerIds.includes(customerId);
+
+            // Optimistic update
+            if (isMember) {
+                const index = this.selectedCustomerIds.indexOf(customerId);
                 this.selectedCustomerIds.splice(index, 1);
             } else {
                 this.selectedCustomerIds.push(customerId);
             }
-        },
-        async saveMembers() {
-            if (!this.selectedGroup) return;
+
             try {
-                this.loading = true;
-                await window.http.post(`/campaign/groups/${this.selectedGroup.id}/members`, {
-                    customer_ids: this.selectedCustomerIds
-                });
-                showSuccessInfo('Group members updated');
-                $('#modalCampaignGroupMembers').modal('hide');
-                await this.loadGroups();
+                if (isMember) {
+                    // Remove member
+                    await window.http.delete(`/campaign/groups/${this.selectedGroup.id}/members/${customerId}`);
+                } else {
+                    // Add member
+                    await window.http.post(`/campaign/groups/${this.selectedGroup.id}/members`, {
+                        customer_ids: [customerId]
+                    });
+                }
+
+                // Refresh IDs to ensure consistency
+                const response = await window.http.get(`/campaign/groups/${this.selectedGroup.id}`);
+                const groupData = response.data.results;
+                this.selectedCustomerIds = (groupData.customers || []).map(c => c.id);
+
+                // Update group count in list
+                const group = this.groups.find(g => g.id === this.selectedGroup.id);
+                if (group) {
+                    group.customer_count = this.selectedCustomerIds.length;
+                }
+
+                // If filtering, reload because item status changed
+                if (this.filterMode !== 'all') {
+                    this.loadCustomers(true);
+                }
             } catch (error) {
+                // Revert update on error
+                if (isMember) {
+                    this.selectedCustomerIds.push(customerId);
+                } else {
+                    const index = this.selectedCustomerIds.indexOf(customerId);
+                    this.selectedCustomerIds.splice(index, 1);
+                }
                 showErrorInfo(error.response?.data?.message || error.message);
-            } finally {
-                this.loading = false;
             }
         },
         nextPage() {
@@ -257,13 +403,55 @@ export default {
             <div class="ui info message">
                 <p>Select customers to add to this group:</p>
             </div>
-            <div class="ui fluid icon input" style="margin-bottom: 15px">
-                <input type="text" v-model="searchQuery" @input="handleSearch" placeholder="Search customers...">
-                <i class="search icon"></i>
             </div>
-            <div class="ui middle aligned divided selection list" style="max-height: 400px; overflow-y: auto">
+            
+            <div class="ui grid" style="margin-bottom: 10px">
+                <div class="eight wide column">
+                    <div class="ui fluid icon input">
+                        <input type="text" v-model="searchQuery" @input="handleSearch" placeholder="Search customers...">
+                        <i class="search icon"></i>
+                    </div>
+                </div>
+                <div class="eight wide column">
+                    <select class="ui fluid dropdown" v-model="filterMode" @change="changeFilter">
+                        <option value="all">All Customers</option>
+                        <option value="member">Members Only</option>
+                        <option value="non_member">Non-Members Only</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="ui segment" v-if="bulkSelectedIds.length > 0">
+                <div class="ui grid middle aligned">
+                    <div class="eight wide column">
+                        <strong>{{ bulkSelectedIds.length }} customers selected</strong>
+                    </div>
+                    <div class="eight wide column right aligned">
+                        <button class="ui mini blue button" :class="{loading: bulkLoading}" @click="bulkAdd">
+                            Add Selected
+                        </button>
+                        <button class="ui mini red button" :class="{loading: bulkLoading}" @click="bulkRemove">
+                            Remove Selected
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="ui middle aligned divided selection list" style="max-height: 400px; overflow-y: auto" @scroll="handleScroll">
+                <div class="item" style="background: #f9f9f9; padding: 10px !important;">
+                    <div class="ui checkbox">
+                        <input type="checkbox" :checked="isAllSelected" @click.stop="toggleSelectAll">
+                        <label>Select All Loaded</label>
+                    </div>
+                </div>
                 <div class="item" v-for="customer in customers" :key="customer.id" 
                      @click="toggleCustomer(customer.id)" style="cursor: pointer">
+                    <div class="left floated content" style="margin-right: 10px;">
+                        <div class="ui checkbox" @click.stop>
+                            <input type="checkbox" :checked="bulkSelectedIds.includes(customer.id)" @change="toggleBulkSelect(customer.id)">
+                            <label></label>
+                        </div>
+                    </div>
                     <div class="right floated content">
                         <div class="ui toggle checkbox">
                             <input type="checkbox" :checked="isCustomerInGroup(customer.id)" @click.stop="toggleCustomer(customer.id)">
@@ -280,11 +468,6 @@ export default {
             <div class="ui message" v-if="customers.length === 0">
                 No customers available. Add customers first.
             </div>
-        </div>
-        <div class="actions">
-            <button class="ui blue button" :class="{loading: loading}" @click="saveMembers">
-                <i class="save icon"></i> Save Members ({{ selectedCustomerIds.length }} selected)
-            </button>
         </div>
     </div>
     `

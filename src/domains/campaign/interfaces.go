@@ -12,7 +12,7 @@ type ICampaignRepository interface {
 	CreateCustomer(ctx context.Context, customer *Customer) error
 	GetCustomer(ctx context.Context, deviceID string, id uuid.UUID) (*Customer, error)
 	GetCustomerByPhone(ctx context.Context, deviceID string, phone string) (*Customer, error)
-	ListCustomers(ctx context.Context, deviceID string, limit, offset int, search string) ([]*Customer, int, error)
+	ListCustomers(ctx context.Context, deviceID string, limit, offset int, search string, filterGroupID *uuid.UUID, filterType string) ([]*Customer, int, error)
 	UpdateCustomer(ctx context.Context, customer *Customer) error
 	DeleteCustomer(ctx context.Context, deviceID string, id uuid.UUID) error
 	DeleteCustomers(ctx context.Context, deviceID string, ids []uuid.UUID) error
@@ -74,7 +74,7 @@ type ICampaignUsecase interface {
 	CreateCustomer(ctx context.Context, req CreateCustomerRequest) (*Customer, error)
 	ImportCustomersFromCSV(ctx context.Context, deviceID string, csvData []byte) (imported int, errors []string, err error)
 	GetCustomer(ctx context.Context, deviceID string, id uuid.UUID) (*Customer, error)
-	ListCustomers(ctx context.Context, deviceID string, page, pageSize int, search string) (*CustomerListResponse, error)
+	ListCustomers(ctx context.Context, deviceID string, page, pageSize int, search string, filterGroupID *uuid.UUID, filterType string) (*CustomerListResponse, error)
 	UpdateCustomer(ctx context.Context, req UpdateCustomerRequest) (*Customer, error)
 	DeleteCustomer(ctx context.Context, deviceID string, id uuid.UUID) error
 	DeleteCustomers(ctx context.Context, deviceID string, ids []uuid.UUID) error

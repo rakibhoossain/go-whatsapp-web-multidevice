@@ -19,7 +19,12 @@ export default {
             statsInterval: null,
             page: 1,
             pageSize: 10,
-            total: 0
+            total: 0,
+            searchQuery: '',
+            searchTimeout: null,
+            customersPage: 1,
+            customersLoading: false,
+            customersHasMore: true
         }
     },
     computed: {
@@ -59,7 +64,13 @@ export default {
                     window.http.get('/campaign/groups')
                 ]);
                 this.templates = templatesRes.data.results.templates || [];
-                this.customers = customersRes.data.results.customers || [];
+                this.templates = templatesRes.data.results.templates || [];
+                // Initialize customers with pagination
+                this.customers = [];
+                this.customersPage = 1;
+                this.customersHasMore = true;
+                await this.loadCustomers();
+                this.groups = groupsRes.data.results.groups || [];
                 this.groups = groupsRes.data.results.groups || [];
             } catch (error) {
                 console.error('Failed to load form data:', error);
@@ -221,6 +232,54 @@ export default {
                 this.loadCampaigns();
             }
         },
+        async loadCustomers(reset = false) {
+            if (this.customersLoading) return;
+
+            if (reset) {
+                this.customersPage = 1;
+                this.customers = [];
+                this.customersHasMore = true;
+            }
+
+            if (!this.customersHasMore) return;
+
+            try {
+                this.customersLoading = true;
+                let url = `/campaign/customers?page=${this.customersPage}&page_size=20`;
+                if (this.searchQuery) {
+                    url += `&search=${encodeURIComponent(this.searchQuery)}`;
+                }
+                const response = await window.http.get(url);
+                const newCustomers = response.data.results.customers || [];
+
+                if (newCustomers.length < 20) {
+                    this.customersHasMore = false;
+                }
+
+                if (reset) {
+                    this.customers = newCustomers;
+                } else {
+                    this.customers = [...this.customers, ...newCustomers];
+                }
+                this.customersPage++;
+            } catch (error) {
+                console.error('Failed to load customers:', error);
+            } finally {
+                this.customersLoading = false;
+            }
+        },
+        handleCustomerScroll(e) {
+            const { scrollTop, scrollHeight, clientHeight } = e.target;
+            if (scrollTop + clientHeight >= scrollHeight - 50) {
+                this.loadCustomers();
+            }
+        },
+        handleSearch() {
+            clearTimeout(this.searchTimeout);
+            this.searchTimeout = setTimeout(() => {
+                this.loadCustomers(true);
+            }, 500);
+        },
         prevPage() {
             if (this.page > 1) {
                 this.page--;
@@ -377,7 +436,11 @@ export default {
                     
                     <div class="field">
                         <label>Select Individual Customers</label>
-                        <div class="ui middle aligned divided selection list" style="max-height: 200px; overflow-y: auto">
+                        <div class="ui fluid icon input" style="margin-bottom: 10px">
+                            <input type="text" v-model="searchQuery" @input="handleSearch" placeholder="Search customers...">
+                            <i class="search icon"></i>
+                        </div>
+                        <div class="ui middle aligned divided selection list" style="max-height: 200px; overflow-y: auto" @scroll="handleCustomerScroll">
                             <div class="item" v-for="customer in customers" :key="customer.id" 
                                  @click="toggleCustomer(customer.id)" style="cursor: pointer">
                                 <div class="right floated content">

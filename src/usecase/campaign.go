@@ -225,7 +225,7 @@ func (s *CampaignService) GetCustomer(ctx context.Context, deviceID string, id u
 	return s.repo.GetCustomer(ctx, deviceID, id)
 }
 
-func (s *CampaignService) ListCustomers(ctx context.Context, deviceID string, page, pageSize int, search string) (*domainCampaign.CustomerListResponse, error) {
+func (s *CampaignService) ListCustomers(ctx context.Context, deviceID string, page, pageSize int, search string, filterGroupID *uuid.UUID, filterType string) (*domainCampaign.CustomerListResponse, error) {
 	if page < 1 {
 		page = 1
 	}
@@ -234,7 +234,7 @@ func (s *CampaignService) ListCustomers(ctx context.Context, deviceID string, pa
 	}
 
 	offset := (page - 1) * pageSize
-	customers, total, err := s.repo.ListCustomers(ctx, deviceID, pageSize, offset, search)
+	customers, total, err := s.repo.ListCustomers(ctx, deviceID, pageSize, offset, search, filterGroupID, filterType)
 	if err != nil {
 		return nil, err
 	}

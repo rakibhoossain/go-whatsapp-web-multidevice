@@ -105,8 +105,17 @@ func (h *Campaign) ListCustomers(c *fiber.Ctx) error {
 	page, _ := strconv.Atoi(c.Query("page", "1"))
 	pageSize, _ := strconv.Atoi(c.Query("page_size", "20"))
 	search := c.Query("search", "")
+	filterGroupIDStr := c.Query("filter_group_id")
+	filterType := c.Query("filter_type")
 
-	result, err := h.Service.ListCustomers(c.UserContext(), deviceID, page, pageSize, search)
+	var filterGroupID *uuid.UUID
+	if filterGroupIDStr != "" {
+		if id, err := uuid.Parse(filterGroupIDStr); err == nil {
+			filterGroupID = &id
+		}
+	}
+
+	result, err := h.Service.ListCustomers(c.UserContext(), deviceID, page, pageSize, search, filterGroupID, filterType)
 	if err != nil {
 		return c.Status(500).JSON(utils.ResponseData{Status: 500, Code: "ERROR", Message: err.Error()})
 	}
@@ -461,7 +470,7 @@ func (h *Campaign) AddGroupMembers(c *fiber.Ctx) error {
 		return c.Status(400).JSON(utils.ResponseData{Status: 400, Code: "ERROR", Message: "Invalid request body"})
 	}
 
-	if err := h.Service.SyncGroupMembers(c.UserContext(), deviceID, groupID, req.CustomerIDs); err != nil {
+	if err := h.Service.AddCustomersToGroup(c.UserContext(), deviceID, groupID, req.CustomerIDs); err != nil {
 		return c.Status(400).JSON(utils.ResponseData{Status: 400, Code: "ERROR", Message: err.Error()})
 	}
 

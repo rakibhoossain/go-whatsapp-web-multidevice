@@ -233,22 +233,69 @@ func (r *Repository) GetCustomerByPhone(ctx context.Context, deviceID string, ph
 	return customer, nil
 }
 
-func (r *Repository) ListCustomers(ctx context.Context, deviceID string, limit, offset int, search string) ([]*domainCampaign.Customer, int, error) {
+func (r *Repository) ListCustomers(ctx context.Context, deviceID string, limit, offset int, search string, filterGroupID *uuid.UUID, filterType string) ([]*domainCampaign.Customer, int, error) {
 	// Build query
-	countQuery := `SELECT COUNT(*) FROM campaign_customers WHERE device_id = $1`
-	selectQuery := `SELECT id, device_id, phone, full_name, company, country, gender, birth_year, phone_valid, whatsapp_exists, created_at, updated_at
-		FROM campaign_customers WHERE device_id = $1`
+	var countQuery, selectQuery string
+	var args []interface{}
 
-	args := []interface{}{deviceID}
+	// JOIN logic based on filter
+	if filterGroupID != nil {
+		if filterType == "member" {
+			countQuery = `SELECT COUNT(*) FROM campaign_customers c 
+				JOIN campaign_group_members gm ON c.id = gm.customer_id 
+				WHERE c.device_id = $1 AND gm.group_id = $2`
+			selectQuery = `SELECT c.id, c.device_id, c.phone, c.full_name, c.company, c.country, c.gender, c.birth_year, c.phone_valid, c.whatsapp_exists, c.created_at, c.updated_at
+				FROM campaign_customers c 
+				JOIN campaign_group_members gm ON c.id = gm.customer_id 
+				WHERE c.device_id = $1 AND gm.group_id = $2`
+			args = []interface{}{deviceID, filterGroupID.String()}
+		} else if filterType == "non_member" {
+			countQuery = `SELECT COUNT(*) FROM campaign_customers c 
+				WHERE c.device_id = $1 AND c.id NOT IN (
+					SELECT customer_id FROM campaign_group_members WHERE group_id = $2
+				)`
+			selectQuery = `SELECT c.id, c.device_id, c.phone, c.full_name, c.company, c.country, c.gender, c.birth_year, c.phone_valid, c.whatsapp_exists, c.created_at, c.updated_at
+				FROM campaign_customers c 
+				WHERE c.device_id = $1 AND c.id NOT IN (
+					SELECT customer_id FROM campaign_group_members WHERE group_id = $2
+				)`
+			args = []interface{}{deviceID, filterGroupID.String()}
+		} else {
+			// fallback/all
+			countQuery = `SELECT COUNT(*) FROM campaign_customers WHERE device_id = $1`
+			selectQuery = `SELECT id, device_id, phone, full_name, company, country, gender, birth_year, phone_valid, whatsapp_exists, created_at, updated_at
+				FROM campaign_customers WHERE device_id = $1`
+			args = []interface{}{deviceID}
+		}
+	} else {
+		countQuery = `SELECT COUNT(*) FROM campaign_customers WHERE device_id = $1`
+		selectQuery = `SELECT id, device_id, phone, full_name, company, country, gender, birth_year, phone_valid, whatsapp_exists, created_at, updated_at
+			FROM campaign_customers WHERE device_id = $1`
+		args = []interface{}{deviceID}
+	}
+
 	if search != "" {
 		// PostgreSQL ILIKE for case-insensitive search
-		likeQuery := " AND (phone ILIKE $2 OR full_name ILIKE $2)"
+		likeQuery := ""
+		// Adjust args index for search query
+		paramIdx := len(args) + 1
+		likeQuery = fmt.Sprintf(" AND (c.phone ILIKE $%d OR c.full_name ILIKE $%d)", paramIdx, paramIdx)
+
+		// If basic query, we might need alias adjustment or not using alias
+		if filterGroupID == nil {
+			likeQuery = fmt.Sprintf(" AND (phone ILIKE $%d OR full_name ILIKE $%d)", paramIdx, paramIdx)
+		}
+
 		countQuery += likeQuery
 		selectQuery += likeQuery
 		args = append(args, "%"+search+"%")
 	}
 
-	selectQuery += ` ORDER BY created_at DESC LIMIT $` + fmt.Sprintf("%d", len(args)+1) + ` OFFSET $` + fmt.Sprintf("%d", len(args)+2)
+	selectQuery += ` ORDER BY c.created_at DESC LIMIT $` + fmt.Sprintf("%d", len(args)+1) + ` OFFSET $` + fmt.Sprintf("%d", len(args)+2)
+	// If basic query, remove alias from ORDER BY if table not aliased
+	if filterGroupID == nil {
+		selectQuery = strings.Replace(selectQuery, "ORDER BY c.created_at", "ORDER BY created_at", 1)
+	}
 
 	// Get total count
 	var total int
