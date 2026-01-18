@@ -388,6 +388,19 @@ func (s *CampaignService) AddCustomersToGroup(ctx context.Context, deviceID stri
 	return s.repo.AddCustomersToGroup(ctx, groupID, customerIDs)
 }
 
+func (s *CampaignService) SyncGroupMembers(ctx context.Context, deviceID string, groupID uuid.UUID, customerIDs []uuid.UUID) error {
+	// Verify group exists
+	group, err := s.repo.GetGroup(ctx, deviceID, groupID)
+	if err != nil {
+		return err
+	}
+	if group == nil {
+		return errors.New("group not found")
+	}
+
+	return s.repo.SyncGroupMembers(ctx, groupID, customerIDs)
+}
+
 func (s *CampaignService) RemoveCustomerFromGroup(ctx context.Context, deviceID string, groupID uuid.UUID, customerID uuid.UUID) error {
 	return s.repo.RemoveCustomerFromGroup(ctx, groupID, customerID)
 }

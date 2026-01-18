@@ -58,9 +58,9 @@ export default {
                     window.http.get('/campaign/customers?page_size=1000'),
                     window.http.get('/campaign/groups')
                 ]);
-                this.templates = templatesRes.data.results || [];
+                this.templates = templatesRes.data.results.templates || [];
                 this.customers = customersRes.data.results.customers || [];
-                this.groups = groupsRes.data.results || [];
+                this.groups = groupsRes.data.results.groups || [];
             } catch (error) {
                 console.error('Failed to load form data:', error);
             }

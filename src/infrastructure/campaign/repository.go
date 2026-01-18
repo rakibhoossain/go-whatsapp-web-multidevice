@@ -503,6 +503,41 @@ func (r *Repository) AddCustomersToGroup(ctx context.Context, groupID uuid.UUID,
 	return tx.Commit()
 }
 
+func (r *Repository) SyncGroupMembers(ctx context.Context, groupID uuid.UUID, customerIDs []uuid.UUID) error {
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	// First delete all existing members for this group
+	_, err = tx.ExecContext(ctx, `DELETE FROM campaign_group_members WHERE group_id = $1`, groupID.String())
+	if err != nil {
+		return err
+	}
+
+	if len(customerIDs) > 0 {
+		stmt, err := tx.PrepareContext(ctx, `
+			INSERT INTO campaign_group_members (group_id, customer_id, created_at)
+			VALUES ($1, $2, $3) ON CONFLICT DO NOTHING
+		`)
+		if err != nil {
+			return err
+		}
+		defer stmt.Close()
+
+		now := time.Now()
+		for _, customerID := range customerIDs {
+			_, err := stmt.ExecContext(ctx, groupID.String(), customerID.String(), now)
+			if err != nil {
+				return err
+			}
+		}
+	}
+
+	return tx.Commit()
+}
+
 func (r *Repository) RemoveCustomerFromGroup(ctx context.Context, groupID uuid.UUID, customerID uuid.UUID) error {
 	_, err := r.db.ExecContext(ctx, `
 		DELETE FROM campaign_group_members WHERE group_id = $1 AND customer_id = $2

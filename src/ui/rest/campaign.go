@@ -461,7 +461,7 @@ func (h *Campaign) AddGroupMembers(c *fiber.Ctx) error {
 		return c.Status(400).JSON(utils.ResponseData{Status: 400, Code: "ERROR", Message: "Invalid request body"})
 	}
 
-	if err := h.Service.AddCustomersToGroup(c.UserContext(), deviceID, groupID, req.CustomerIDs); err != nil {
+	if err := h.Service.SyncGroupMembers(c.UserContext(), deviceID, groupID, req.CustomerIDs); err != nil {
 		return c.Status(400).JSON(utils.ResponseData{Status: 400, Code: "ERROR", Message: err.Error()})
 	}
 

@@ -14,7 +14,9 @@ export default {
             selectedCustomerIds: [],
             page: 1,
             pageSize: 10,
-            total: 0
+            total: 0,
+            searchQuery: '',
+            searchTimeout: null
         }
     },
     computed: {
@@ -41,11 +43,21 @@ export default {
         },
         async loadCustomers() {
             try {
-                const response = await window.http.get('/campaign/customers?page_size=1000');
+                let url = '/campaign/customers?page_size=1000';
+                if (this.searchQuery) {
+                    url += `&search=${encodeURIComponent(this.searchQuery)}`;
+                }
+                const response = await window.http.get(url);
                 this.customers = response.data.results.customers || [];
             } catch (error) {
                 console.error('Failed to load customers:', error);
             }
+        },
+        handleSearch() {
+            clearTimeout(this.searchTimeout);
+            this.searchTimeout = setTimeout(() => {
+                this.loadCustomers();
+            }, 500);
         },
         openCreateModal() {
             this.resetForm();
@@ -102,6 +114,7 @@ export default {
         },
         async openMembersModal(group) {
             this.selectedGroup = group;
+            this.searchQuery = ''; // Reset search on open
             await this.loadCustomers();
             const response = await window.http.get(`/campaign/groups/${group.id}`);
             const groupData = response.data.results;
@@ -243,6 +256,10 @@ export default {
         <div class="scrolling content">
             <div class="ui info message">
                 <p>Select customers to add to this group:</p>
+            </div>
+            <div class="ui fluid icon input" style="margin-bottom: 15px">
+                <input type="text" v-model="searchQuery" @input="handleSearch" placeholder="Search customers...">
+                <i class="search icon"></i>
             </div>
             <div class="ui middle aligned divided selection list" style="max-height: 400px; overflow-y: auto">
                 <div class="item" v-for="customer in customers" :key="customer.id" 

@@ -27,6 +27,7 @@ type ICampaignRepository interface {
 	UpdateGroup(ctx context.Context, group *Group) error
 	DeleteGroup(ctx context.Context, deviceID string, id uuid.UUID) error
 	AddCustomersToGroup(ctx context.Context, groupID uuid.UUID, customerIDs []uuid.UUID) error
+	SyncGroupMembers(ctx context.Context, groupID uuid.UUID, customerIDs []uuid.UUID) error
 	RemoveCustomerFromGroup(ctx context.Context, groupID uuid.UUID, customerID uuid.UUID) error
 	GetGroupCustomers(ctx context.Context, groupID uuid.UUID) ([]*Customer, error)
 	GetCustomerGroups(ctx context.Context, customerID uuid.UUID) ([]*Group, error)
@@ -89,6 +90,7 @@ type ICampaignUsecase interface {
 	UpdateGroup(ctx context.Context, req UpdateGroupRequest) (*Group, error)
 	DeleteGroup(ctx context.Context, deviceID string, id uuid.UUID) error
 	AddCustomersToGroup(ctx context.Context, deviceID string, groupID uuid.UUID, customerIDs []uuid.UUID) error
+	SyncGroupMembers(ctx context.Context, deviceID string, groupID uuid.UUID, customerIDs []uuid.UUID) error
 	RemoveCustomerFromGroup(ctx context.Context, deviceID string, groupID uuid.UUID, customerID uuid.UUID) error
 
 	// Template management
