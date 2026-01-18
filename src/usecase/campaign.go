@@ -95,6 +95,13 @@ func (s *CampaignService) CreateCustomer(ctx context.Context, req domainCampaign
 		"id":        customer.ID,
 	}).Info("Campaign: Customer created")
 
+	// Trigger validation in background
+	go func() {
+		if err := s.ValidatePendingCustomers(context.Background(), req.DeviceID); err != nil {
+			logrus.Errorf("Campaign: Failed to auto-validate customer: %v", err)
+		}
+	}()
+
 	return customer, nil
 }
 
@@ -201,6 +208,16 @@ func (s *CampaignService) ImportCustomersFromCSV(ctx context.Context, deviceID s
 	}
 
 	imported, err = s.repo.BulkCreateCustomers(ctx, customers)
+
+	// Trigger validation in background if import successful
+	if err == nil && imported > 0 {
+		go func() {
+			if err := s.ValidatePendingCustomers(context.Background(), deviceID); err != nil {
+				logrus.Errorf("Campaign: Failed to auto-validate imported customers: %v", err)
+			}
+		}()
+	}
+
 	return imported, errorsOut, err
 }
 
@@ -263,6 +280,15 @@ func (s *CampaignService) UpdateCustomer(ctx context.Context, req domainCampaign
 
 	if err := s.repo.UpdateCustomer(ctx, customer); err != nil {
 		return nil, err
+	}
+
+	if phoneChanged {
+		// Trigger validation in background
+		go func() {
+			if err := s.ValidatePendingCustomers(context.Background(), req.DeviceID); err != nil {
+				logrus.Errorf("Campaign: Failed to auto-validate updated customer: %v", err)
+			}
+		}()
 	}
 
 	return customer, nil
