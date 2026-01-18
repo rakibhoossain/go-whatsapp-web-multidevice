@@ -78,8 +78,9 @@ type ICampaignUsecase interface {
 	DeleteCustomer(ctx context.Context, deviceID string, id uuid.UUID) error
 	DeleteCustomers(ctx context.Context, deviceID string, ids []uuid.UUID) error
 	ValidateCustomer(ctx context.Context, deviceID string, id uuid.UUID) error // Manual validation trigger
-	ValidatePendingCustomers(ctx context.Context, deviceID string) error       // Bulk manual validation trigger
-	StartValidationWorker(ctx context.Context)                                 // Background validation
+	ValidateCustomers(ctx context.Context, deviceID string, ids []uuid.UUID) error
+	ValidatePendingCustomers(ctx context.Context, deviceID string) error // Bulk manual validation trigger
+	StartValidationWorker(ctx context.Context)                           // Background validation
 
 	// Group management
 	CreateGroup(ctx context.Context, req CreateGroupRequest) (*Group, error)

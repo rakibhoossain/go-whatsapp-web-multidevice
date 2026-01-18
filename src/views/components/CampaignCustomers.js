@@ -72,6 +72,22 @@ export default {
                 this.loading = false;
             }
         },
+        async validateSelectedCustomers() {
+            if (this.selectedIds.length === 0) return;
+            if (!confirm(`Are you sure you want to validate ${this.selectedIds.length} customers?`)) return;
+
+            try {
+                this.loading = true;
+                await window.http.post('/campaign/customers/validate-bulk', { ids: this.selectedIds });
+                showSuccessInfo('Validation started');
+                this.selectedIds = [];
+                await this.loadCustomers();
+            } catch (error) {
+                showErrorInfo(error.response?.data?.message || error.message);
+            } finally {
+                this.loading = false;
+            }
+        },
         toggleSelectAll() {
             if (this.selectedIds.length === this.customers.length) {
                 this.selectedIds = [];
@@ -270,6 +286,9 @@ export default {
             <div class="ui buttons right floated" style="margin-left: 10px">
                 <button class="ui red button" v-if="selectedIds.length > 0" @click.stop="deleteSelectedCustomers" style="margin-right: 5px">
                     <i class="trash icon"></i> Delete ({{ selectedIds.length }})
+                </button>
+                <button class="ui purple button" v-if="selectedIds.length > 0" @click.stop="validateSelectedCustomers" style="margin-right: 5px">
+                    <i class="check double icon"></i> Validate ({{ selectedIds.length }})
                 </button>
                 <button class="ui orange button" @click.stop="validatePendingCustomers" style="margin-right: 5px">
                     <i class="sync icon"></i> Check Again

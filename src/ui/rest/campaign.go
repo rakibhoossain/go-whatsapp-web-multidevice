@@ -34,6 +34,7 @@ func InitRestCampaign(app fiber.Router, service domainCampaign.ICampaignUsecase)
 	campaign.Post("/customers/bulk-delete", rest.DeleteCustomers)
 	campaign.Post("/customers/:id/validate", rest.ValidateCustomer)
 	campaign.Post("/customers/validate-pending", rest.ValidatePendingCustomers)
+	campaign.Post("/customers/validate-bulk", rest.ValidateBulk)
 
 	// Groups
 	campaign.Get("/groups", rest.ListGroups)
@@ -300,6 +301,41 @@ func (h *Campaign) ValidatePendingCustomers(c *fiber.Ctx) error {
 	}
 
 	return c.JSON(utils.ResponseData{Status: 200, Code: "SUCCESS", Message: "Bulk validation processed"})
+}
+
+func (h *Campaign) ValidateBulk(c *fiber.Ctx) error {
+	deviceID, err := h.checkDeviceConnected(c)
+	if err != nil {
+		return err
+	}
+
+	var req struct {
+		IDs []string `json:"ids"`
+	}
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(400).JSON(utils.ResponseData{Status: 400, Code: "ERROR", Message: "Invalid request body"})
+	}
+
+	if len(req.IDs) == 0 {
+		return c.Status(400).JSON(utils.ResponseData{Status: 400, Code: "ERROR", Message: "No IDs provided"})
+	}
+
+	var uuids []uuid.UUID
+	for _, idStr := range req.IDs {
+		id, err := uuid.Parse(idStr)
+		if err != nil {
+			return c.Status(400).JSON(utils.ResponseData{Status: 400, Code: "ERROR", Message: fmt.Sprintf("Invalid ID: %s", idStr)})
+		}
+		uuids = append(uuids, id)
+	}
+
+	// Pass device context so usecase can access WhatsApp client for validation
+	ctx := whatsapp.ContextWithDevice(c.UserContext(), getDeviceFromCtx(c))
+	if err := h.Service.ValidateCustomers(ctx, deviceID, uuids); err != nil {
+		return c.Status(500).JSON(utils.ResponseData{Status: 500, Code: "ERROR", Message: err.Error()})
+	}
+
+	return c.JSON(utils.ResponseData{Status: 200, Code: "SUCCESS", Message: "Validation processed"})
 }
 
 // ============================================================================
