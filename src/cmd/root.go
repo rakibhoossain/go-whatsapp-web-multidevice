@@ -329,7 +329,7 @@ func initApp() {
 	deviceUsecase = usecase.NewDeviceService(dm)
 
 	// Campaign module
-	campaignRepo := campaignInfra.NewRepository(chatStorageDB)
+	campaignRepo := campaignInfra.NewRepository(whatsappDB)
 	if err := campaignRepo.InitializeSchema(); err != nil {
 		logrus.Warnf("failed to initialize campaign schema: %v", err)
 	} else {

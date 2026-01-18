@@ -32,28 +32,9 @@ export default {
         async loadCustomers() {
             try {
                 this.loading = true;
-                // Destroy existing table before updating data to avoid Vue/jQuery conflicts
-                if ($.fn.DataTable.isDataTable('#campaign_customers_table')) {
-                    $('#campaign_customers_table').DataTable().destroy();
-                }
-
                 const response = await window.http.get(`/campaign/customers?page=${this.page}&page_size=${this.pageSize}`);
                 this.customers = response.data.results.customers || [];
                 this.total = response.data.results.total;
-
-                // Re-initialize table after Vue updates DOM
-                this.$nextTick(() => {
-                    $('#campaign_customers_table').DataTable({
-                        pageLength: 10,
-                        ordering: false,
-                        paging: false,
-                        info: false,
-                        // Preserve language/search settings if needed
-                        language: {
-                            emptyTable: "No customers found"
-                        }
-                    });
-                });
             } catch (error) {
                 showErrorInfo(error.response?.data?.message || error.message);
             } finally {
@@ -152,6 +133,20 @@ export default {
                 // Don't show error to user for auto-checks
             }
         },
+        async validatePendingCustomers() {
+            if (!confirm('Start validation for pending customers? This will check up to 1000 pending numbers.')) return;
+            try {
+                this.loading = true;
+                // Use new bulk endpoint
+                await window.http.post('/campaign/customers/validate-pending');
+                showSuccessInfo('Validation check started');
+                await this.loadCustomers();
+            } catch (error) {
+                showErrorInfo(error.response?.data?.message || error.message);
+            } finally {
+                this.loading = false;
+            }
+        },
         openImportModal() {
             this.importErrors = [];
             $('#modalCampaignCustomerImport').modal('show');
@@ -232,6 +227,10 @@ export default {
         <div class="header">
             <i class="users icon"></i> Campaign Customers
             <div class="ui buttons right floated" style="margin-left: 10px">
+                <button class="ui orange button" @click.stop="validatePendingCustomers">
+                    <i class="sync icon"></i> Check Again
+                </button>
+                <div class="or"></div>
                 <button class="ui green button" @click.stop="openCreateModal">
                     <i class="plus icon"></i> Add
                 </button>

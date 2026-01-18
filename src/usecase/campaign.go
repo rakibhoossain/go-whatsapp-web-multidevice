@@ -1144,6 +1144,74 @@ func (s *CampaignService) ValidateCustomer(ctx context.Context, deviceID string,
 	return nil
 }
 
+func (s *CampaignService) ValidatePendingCustomers(ctx context.Context, deviceID string) error {
+	// Get customers needing validation
+	// Limit to 1000 for now to avoid timeout, user can click again if needed
+	customers, err := s.repo.GetCustomersForValidation(ctx, deviceID, 1000)
+	if err != nil {
+		return err
+	}
+
+	if len(customers) == 0 {
+		return nil
+	}
+
+	// Try to get WhatsApp client from context or device manager
+	var client *whatsmeow.Client
+
+	// Check context first
+	client = whatsapp.ClientFromContext(ctx)
+
+	// Fallback to device manager
+	if client == nil {
+		if dm := whatsapp.GetDeviceManager(); dm != nil {
+			if device, ok := dm.GetDevice(deviceID); ok && device != nil {
+				client = device.GetClient()
+			}
+		}
+	}
+
+	if client == nil || !client.IsLoggedIn() {
+		return errors.New("whatsapp client not connected")
+	}
+
+	logrus.WithFields(logrus.Fields{
+		"device_id": deviceID,
+		"count":     len(customers),
+	}).Info("Campaign: Starting bulk validation")
+
+	for _, customer := range customers {
+		// Validate phone format
+		phoneValid := domainCampaign.ValidationStatusValid
+		if err := validations.ValidatePhoneNumber(customer.Phone); err != nil {
+			phoneValid = domainCampaign.ValidationStatusInvalid
+		}
+
+		// Check WhatsApp existence
+		whatsappExists := domainCampaign.ValidationStatusPending
+		if phoneValid == domainCampaign.ValidationStatusValid {
+			phone := strings.TrimPrefix(customer.Phone, "+")
+			jid := phone + "@s.whatsapp.net"
+			if utils.IsOnWhatsapp(client, jid) {
+				whatsappExists = domainCampaign.ValidationStatusValid
+			} else {
+				whatsappExists = domainCampaign.ValidationStatusInvalid
+			}
+		}
+
+		// Update validation status
+		if err := s.repo.UpdateCustomerValidation(ctx, customer.ID, phoneValid, whatsappExists); err != nil {
+			logrus.Errorf("Campaign: Failed to update customer validation %s: %v", customer.ID, err)
+		}
+
+		// Small delay to avoid rate limiting
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	logrus.Info("Campaign: Bulk validation completed")
+	return nil
+}
+
 func (s *CampaignService) StartValidationWorker(ctx context.Context) {
 	// Validation worker runs less frequently than message worker
 	go func() {

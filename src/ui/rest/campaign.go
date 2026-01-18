@@ -31,6 +31,7 @@ func InitRestCampaign(app fiber.Router, service domainCampaign.ICampaignUsecase)
 	campaign.Put("/customers/:id", rest.UpdateCustomer)
 	campaign.Delete("/customers/:id", rest.DeleteCustomer)
 	campaign.Post("/customers/:id/validate", rest.ValidateCustomer)
+	campaign.Post("/customers/validate-pending", rest.ValidatePendingCustomers)
 
 	// Groups
 	campaign.Get("/groups", rest.ListGroups)
@@ -248,6 +249,21 @@ func (h *Campaign) ValidateCustomer(c *fiber.Ctx) error {
 	}
 
 	return c.JSON(utils.ResponseData{Status: 200, Code: "SUCCESS", Message: "Customer validated"})
+}
+
+func (h *Campaign) ValidatePendingCustomers(c *fiber.Ctx) error {
+	deviceID, err := h.checkDeviceConnected(c)
+	if err != nil {
+		return err
+	}
+
+	// Pass device context so usecase can access WhatsApp client for validation
+	ctx := whatsapp.ContextWithDevice(c.UserContext(), getDeviceFromCtx(c))
+	if err := h.Service.ValidatePendingCustomers(ctx, deviceID); err != nil {
+		return c.Status(500).JSON(utils.ResponseData{Status: 500, Code: "ERROR", Message: err.Error()})
+	}
+
+	return c.JSON(utils.ResponseData{Status: 200, Code: "SUCCESS", Message: "Bulk validation processed"})
 }
 
 // ============================================================================

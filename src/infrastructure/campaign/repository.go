@@ -4,10 +4,14 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"reflect"
 	"strings"
 	"time"
+	"unsafe"
 
 	"github.com/google/uuid"
+	"go.mau.fi/util/dbutil"
+	"go.mau.fi/whatsmeow/store/sqlstore"
 
 	domainCampaign "github.com/aldinokemal/go-whatsapp-web-multidevice/domains/campaign"
 )
@@ -18,8 +22,16 @@ type Repository struct {
 }
 
 // NewRepository creates a new campaign repository
-func NewRepository(db *sql.DB) *Repository {
-	return &Repository{db: db}
+func NewRepository(container *sqlstore.Container) *Repository {
+	// Access unexported 'db' field from container using reflection
+	// This avoids modifying external packages while reusing the existing connection
+	rs := reflect.ValueOf(container).Elem()
+	rf := rs.FieldByName("db")
+	rf = reflect.NewAt(rf.Type(), unsafe.Pointer(rf.UnsafeAddr())).Elem()
+
+	dbWrapper := rf.Interface().(*dbutil.Database)
+
+	return &Repository{db: dbWrapper.RawDB}
 }
 
 // InitializeSchema runs campaign migrations
@@ -166,7 +178,7 @@ func (r *Repository) CreateCustomer(ctx context.Context, customer *domainCampaig
 
 	_, err := r.db.ExecContext(ctx, `
 		INSERT INTO campaign_customers (id, device_id, phone, full_name, company, country, gender, birth_year, phone_valid, whatsapp_exists, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 	`, customer.ID.String(), customer.DeviceID, customer.Phone, customer.FullName, customer.Company, customer.Country,
 		customer.Gender, customer.BirthYear, string(customer.PhoneValid), string(customer.WhatsAppExists),
 		customer.CreatedAt, customer.UpdatedAt)
@@ -179,7 +191,7 @@ func (r *Repository) GetCustomer(ctx context.Context, deviceID string, id uuid.U
 	var phoneValid, whatsappExists string
 	err := r.db.QueryRowContext(ctx, `
 		SELECT id, device_id, phone, full_name, company, country, gender, birth_year, phone_valid, whatsapp_exists, created_at, updated_at
-		FROM campaign_customers WHERE id = ? AND device_id = ?
+		FROM campaign_customers WHERE id = $1 AND device_id = $2
 	`, id.String(), deviceID).Scan(&idStr, &customer.DeviceID, &customer.Phone, &customer.FullName,
 		&customer.Company, &customer.Country, &customer.Gender, &customer.BirthYear,
 		&phoneValid, &whatsappExists, &customer.CreatedAt, &customer.UpdatedAt)
@@ -203,7 +215,7 @@ func (r *Repository) GetCustomerByPhone(ctx context.Context, deviceID string, ph
 	var phoneValid, whatsappExists string
 	err := r.db.QueryRowContext(ctx, `
 		SELECT id, device_id, phone, full_name, company, country, gender, birth_year, phone_valid, whatsapp_exists, created_at, updated_at
-		FROM campaign_customers WHERE phone = ? AND device_id = ?
+		FROM campaign_customers WHERE phone = $1 AND device_id = $2
 	`, phone, deviceID).Scan(&idStr, &customer.DeviceID, &customer.Phone, &customer.FullName,
 		&customer.Company, &customer.Country, &customer.Gender, &customer.BirthYear,
 		&phoneValid, &whatsappExists, &customer.CreatedAt, &customer.UpdatedAt)
@@ -225,7 +237,7 @@ func (r *Repository) ListCustomers(ctx context.Context, deviceID string, limit, 
 	// Get total count
 	var total int
 	err := r.db.QueryRowContext(ctx, `
-		SELECT COUNT(*) FROM campaign_customers WHERE device_id = ?
+		SELECT COUNT(*) FROM campaign_customers WHERE device_id = $1
 	`, deviceID).Scan(&total)
 	if err != nil {
 		return nil, 0, err
@@ -234,7 +246,7 @@ func (r *Repository) ListCustomers(ctx context.Context, deviceID string, limit, 
 	// Get customers
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, device_id, phone, full_name, company, country, gender, birth_year, phone_valid, whatsapp_exists, created_at, updated_at
-		FROM campaign_customers WHERE device_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?
+		FROM campaign_customers WHERE device_id = $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3
 	`, deviceID, limit, offset)
 	if err != nil {
 		return nil, 0, err
@@ -264,9 +276,9 @@ func (r *Repository) ListCustomers(ctx context.Context, deviceID string, limit, 
 func (r *Repository) UpdateCustomer(ctx context.Context, customer *domainCampaign.Customer) error {
 	customer.UpdatedAt = time.Now()
 	_, err := r.db.ExecContext(ctx, `
-		UPDATE campaign_customers SET phone = ?, full_name = ?, company = ?, country = ?, gender = ?, birth_year = ?, 
-			phone_valid = ?, whatsapp_exists = ?, updated_at = ?
-		WHERE id = ? AND device_id = ?
+		UPDATE campaign_customers SET phone = $1, full_name = $2, company = $3, country = $4, gender = $5, birth_year = $6, 
+			phone_valid = $7, whatsapp_exists = $8, updated_at = $9
+		WHERE id = $10 AND device_id = $11
 	`, customer.Phone, customer.FullName, customer.Company, customer.Country, customer.Gender, customer.BirthYear,
 		string(customer.PhoneValid), string(customer.WhatsAppExists),
 		customer.UpdatedAt, customer.ID.String(), customer.DeviceID)
@@ -274,7 +286,7 @@ func (r *Repository) UpdateCustomer(ctx context.Context, customer *domainCampaig
 }
 
 func (r *Repository) DeleteCustomer(ctx context.Context, deviceID string, id uuid.UUID) error {
-	_, err := r.db.ExecContext(ctx, `DELETE FROM campaign_customers WHERE id = ? AND device_id = ?`, id.String(), deviceID)
+	_, err := r.db.ExecContext(ctx, `DELETE FROM campaign_customers WHERE id = $1 AND device_id = $2`, id.String(), deviceID)
 	return err
 }
 
@@ -291,7 +303,7 @@ func (r *Repository) BulkCreateCustomers(ctx context.Context, customers []*domai
 
 	stmt, err := tx.PrepareContext(ctx, `
 		INSERT INTO campaign_customers (id, device_id, phone, full_name, company, country, gender, birth_year, phone_valid, whatsapp_exists, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 		ON CONFLICT(device_id, phone) DO UPDATE SET
 			full_name = excluded.full_name,
 			company = excluded.company,
@@ -337,7 +349,7 @@ func (r *Repository) CreateGroup(ctx context.Context, group *domainCampaign.Grou
 
 	_, err := r.db.ExecContext(ctx, `
 		INSERT INTO campaign_groups (id, device_id, name, description, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?)
+		VALUES ($1, $2, $3, $4, $5, $6)
 	`, group.ID.String(), group.DeviceID, group.Name, group.Description, group.CreatedAt, group.UpdatedAt)
 	return err
 }
@@ -348,7 +360,7 @@ func (r *Repository) GetGroup(ctx context.Context, deviceID string, id uuid.UUID
 	err := r.db.QueryRowContext(ctx, `
 		SELECT g.id, g.device_id, g.name, g.description, g.created_at, g.updated_at,
 			(SELECT COUNT(*) FROM campaign_group_members WHERE group_id = g.id) as customer_count
-		FROM campaign_groups g WHERE g.id = ? AND g.device_id = ?
+		FROM campaign_groups g WHERE g.id = $1 AND g.device_id = $2
 	`, id.String(), deviceID).Scan(&idStr, &group.DeviceID, &group.Name, &group.Description,
 		&group.CreatedAt, &group.UpdatedAt, &group.CustomerCount)
 	if err == sql.ErrNoRows {
@@ -363,7 +375,7 @@ func (r *Repository) GetGroup(ctx context.Context, deviceID string, id uuid.UUID
 
 func (r *Repository) ListGroups(ctx context.Context, deviceID string, limit, offset int) ([]*domainCampaign.Group, int, error) {
 	var total int
-	err := r.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM campaign_groups WHERE device_id = ?", deviceID).Scan(&total)
+	err := r.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM campaign_groups WHERE device_id = $1", deviceID).Scan(&total)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -371,7 +383,7 @@ func (r *Repository) ListGroups(ctx context.Context, deviceID string, limit, off
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT g.id, g.device_id, g.name, g.description, g.created_at, g.updated_at,
 			(SELECT COUNT(*) FROM campaign_group_members WHERE group_id = g.id) as customer_count
-		FROM campaign_groups g WHERE g.device_id = ? ORDER BY g.name ASC LIMIT ? OFFSET ?
+		FROM campaign_groups g WHERE g.device_id = $1 ORDER BY g.name ASC LIMIT $2 OFFSET $3
 	`, deviceID, limit, offset)
 	if err != nil {
 		return nil, 0, err
@@ -395,8 +407,8 @@ func (r *Repository) ListGroups(ctx context.Context, deviceID string, limit, off
 func (r *Repository) UpdateGroup(ctx context.Context, group *domainCampaign.Group) error {
 	group.UpdatedAt = time.Now()
 	_, err := r.db.ExecContext(ctx, `
-		UPDATE campaign_groups SET name = ?, description = ?, updated_at = ?
-		WHERE id = ? AND device_id = ?
+		UPDATE campaign_groups SET name = $1, description = $2, updated_at = $3
+		WHERE id = $4 AND device_id = $5
 	`, group.Name, group.Description, group.UpdatedAt, group.ID.String(), group.DeviceID)
 	return err
 }
@@ -409,13 +421,13 @@ func (r *Repository) DeleteGroup(ctx context.Context, deviceID string, id uuid.U
 	defer tx.Rollback()
 
 	// Delete group members first
-	_, err = tx.ExecContext(ctx, `DELETE FROM campaign_group_members WHERE group_id = ?`, id.String())
+	_, err = tx.ExecContext(ctx, `DELETE FROM campaign_group_members WHERE group_id = $1`, id.String())
 	if err != nil {
 		return err
 	}
 
 	// Delete group
-	_, err = tx.ExecContext(ctx, `DELETE FROM campaign_groups WHERE id = ? AND device_id = ?`, id.String(), deviceID)
+	_, err = tx.ExecContext(ctx, `DELETE FROM campaign_groups WHERE id = $1 AND device_id = $2`, id.String(), deviceID)
 	if err != nil {
 		return err
 	}
@@ -436,7 +448,7 @@ func (r *Repository) AddCustomersToGroup(ctx context.Context, groupID uuid.UUID,
 
 	stmt, err := tx.PrepareContext(ctx, `
 		INSERT INTO campaign_group_members (group_id, customer_id, created_at)
-		VALUES (?, ?, ?) ON CONFLICT DO NOTHING
+		VALUES ($1, $2, $3) ON CONFLICT DO NOTHING
 	`)
 	if err != nil {
 		return err
@@ -456,7 +468,7 @@ func (r *Repository) AddCustomersToGroup(ctx context.Context, groupID uuid.UUID,
 
 func (r *Repository) RemoveCustomerFromGroup(ctx context.Context, groupID uuid.UUID, customerID uuid.UUID) error {
 	_, err := r.db.ExecContext(ctx, `
-		DELETE FROM campaign_group_members WHERE group_id = ? AND customer_id = ?
+		DELETE FROM campaign_group_members WHERE group_id = $1 AND customer_id = $2
 	`, groupID.String(), customerID.String())
 	return err
 }
@@ -466,7 +478,7 @@ func (r *Repository) GetGroupCustomers(ctx context.Context, groupID uuid.UUID) (
 		SELECT c.id, c.device_id, c.phone, c.full_name, c.country, c.gender, c.birth_year, c.created_at, c.updated_at
 		FROM campaign_customers c
 		INNER JOIN campaign_group_members gm ON c.id = gm.customer_id
-		WHERE gm.group_id = ?
+		WHERE gm.group_id = $1
 	`, groupID.String())
 	if err != nil {
 		return nil, err
@@ -492,7 +504,7 @@ func (r *Repository) GetCustomerGroups(ctx context.Context, customerID uuid.UUID
 		SELECT g.id, g.device_id, g.name, g.description, g.created_at, g.updated_at
 		FROM campaign_groups g
 		INNER JOIN campaign_group_members gm ON g.id = gm.group_id
-		WHERE gm.customer_id = ?
+		WHERE gm.customer_id = $1
 	`, customerID.String())
 	if err != nil {
 		return nil, err
@@ -524,7 +536,7 @@ func (r *Repository) CreateTemplate(ctx context.Context, template *domainCampaig
 
 	_, err := r.db.ExecContext(ctx, `
 		INSERT INTO campaign_templates (id, device_id, name, content, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?)
+		VALUES ($1, $2, $3, $4, $5, $6)
 	`, template.ID.String(), template.DeviceID, template.Name, template.Content, template.CreatedAt, template.UpdatedAt)
 	return err
 }
@@ -534,7 +546,7 @@ func (r *Repository) GetTemplate(ctx context.Context, deviceID string, id uuid.U
 	var idStr string
 	err := r.db.QueryRowContext(ctx, `
 		SELECT id, device_id, name, content, created_at, updated_at
-		FROM campaign_templates WHERE id = ? AND device_id = ?
+		FROM campaign_templates WHERE id = $1 AND device_id = $2
 	`, id.String(), deviceID).Scan(&idStr, &template.DeviceID, &template.Name, &template.Content,
 		&template.CreatedAt, &template.UpdatedAt)
 	if err == sql.ErrNoRows {
@@ -549,14 +561,14 @@ func (r *Repository) GetTemplate(ctx context.Context, deviceID string, id uuid.U
 
 func (r *Repository) ListTemplates(ctx context.Context, deviceID string, limit, offset int) ([]*domainCampaign.Template, int, error) {
 	var total int
-	err := r.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM campaign_templates WHERE device_id = ?", deviceID).Scan(&total)
+	err := r.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM campaign_templates WHERE device_id = $1", deviceID).Scan(&total)
 	if err != nil {
 		return nil, 0, err
 	}
 
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, device_id, name, content, created_at, updated_at
-		FROM campaign_templates WHERE device_id = ? ORDER BY name ASC LIMIT ? OFFSET ?
+		FROM campaign_templates WHERE device_id = $1 ORDER BY name ASC LIMIT $2 OFFSET $3
 	`, deviceID, limit, offset)
 	if err != nil {
 		return nil, 0, err
@@ -580,14 +592,14 @@ func (r *Repository) ListTemplates(ctx context.Context, deviceID string, limit, 
 func (r *Repository) UpdateTemplate(ctx context.Context, template *domainCampaign.Template) error {
 	template.UpdatedAt = time.Now()
 	_, err := r.db.ExecContext(ctx, `
-		UPDATE campaign_templates SET name = ?, content = ?, updated_at = ?
-		WHERE id = ? AND device_id = ?
+		UPDATE campaign_templates SET name = $1, content = $2, updated_at = $3
+		WHERE id = $4 AND device_id = $5
 	`, template.Name, template.Content, template.UpdatedAt, template.ID.String(), template.DeviceID)
 	return err
 }
 
 func (r *Repository) DeleteTemplate(ctx context.Context, deviceID string, id uuid.UUID) error {
-	_, err := r.db.ExecContext(ctx, `DELETE FROM campaign_templates WHERE id = ? AND device_id = ?`, id.String(), deviceID)
+	_, err := r.db.ExecContext(ctx, `DELETE FROM campaign_templates WHERE id = $1 AND device_id = $2`, id.String(), deviceID)
 	return err
 }
 
@@ -605,7 +617,7 @@ func (r *Repository) CreateCampaign(ctx context.Context, campaign *domainCampaig
 
 	_, err := r.db.ExecContext(ctx, `
 		INSERT INTO campaigns (id, device_id, name, template_id, status, scheduled_at, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 	`, campaign.ID.String(), campaign.DeviceID, campaign.Name, campaign.TemplateID.String(),
 		string(campaign.Status), campaign.ScheduledAt, campaign.CreatedAt, campaign.UpdatedAt)
 	return err
@@ -616,7 +628,7 @@ func (r *Repository) GetCampaign(ctx context.Context, deviceID string, id uuid.U
 	var idStr, templateIDStr, status string
 	err := r.db.QueryRowContext(ctx, `
 		SELECT id, device_id, name, template_id, status, scheduled_at, started_at, completed_at, created_at, updated_at
-		FROM campaigns WHERE id = ? AND device_id = ?
+		FROM campaigns WHERE id = $1 AND device_id = $2
 	`, id.String(), deviceID).Scan(&idStr, &campaign.DeviceID, &campaign.Name, &templateIDStr,
 		&status, &campaign.ScheduledAt, &campaign.StartedAt, &campaign.CompletedAt,
 		&campaign.CreatedAt, &campaign.UpdatedAt)
@@ -634,14 +646,14 @@ func (r *Repository) GetCampaign(ctx context.Context, deviceID string, id uuid.U
 
 func (r *Repository) ListCampaigns(ctx context.Context, deviceID string, limit, offset int) ([]*domainCampaign.Campaign, int, error) {
 	var total int
-	err := r.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM campaigns WHERE device_id = ?", deviceID).Scan(&total)
+	err := r.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM campaigns WHERE device_id = $1", deviceID).Scan(&total)
 	if err != nil {
 		return nil, 0, err
 	}
 
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, device_id, name, template_id, status, scheduled_at, started_at, completed_at, created_at, updated_at
-		FROM campaigns WHERE device_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?
+		FROM campaigns WHERE device_id = $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3
 	`, deviceID, limit, offset)
 	if err != nil {
 		return nil, 0, err
@@ -668,9 +680,9 @@ func (r *Repository) ListCampaigns(ctx context.Context, deviceID string, limit, 
 func (r *Repository) UpdateCampaign(ctx context.Context, campaign *domainCampaign.Campaign) error {
 	campaign.UpdatedAt = time.Now()
 	_, err := r.db.ExecContext(ctx, `
-		UPDATE campaigns SET name = ?, template_id = ?, status = ?, scheduled_at = ?,
-			started_at = ?, completed_at = ?, updated_at = ?
-		WHERE id = ? AND device_id = ?
+		UPDATE campaigns SET name = $1, template_id = $2, status = $3, scheduled_at = $4,
+			started_at = $5, completed_at = $6, updated_at = $7
+		WHERE id = $8 AND device_id = $9
 	`, campaign.Name, campaign.TemplateID.String(), string(campaign.Status), campaign.ScheduledAt,
 		campaign.StartedAt, campaign.CompletedAt, campaign.UpdatedAt, campaign.ID.String(), campaign.DeviceID)
 	return err
@@ -684,10 +696,10 @@ func (r *Repository) DeleteCampaign(ctx context.Context, deviceID string, id uui
 	defer tx.Rollback()
 
 	// Delete targets and messages
-	_, _ = tx.ExecContext(ctx, `DELETE FROM campaign_target_customers WHERE campaign_id = ?`, id.String())
-	_, _ = tx.ExecContext(ctx, `DELETE FROM campaign_target_groups WHERE campaign_id = ?`, id.String())
-	_, _ = tx.ExecContext(ctx, `DELETE FROM campaign_messages WHERE campaign_id = ?`, id.String())
-	_, err = tx.ExecContext(ctx, `DELETE FROM campaigns WHERE id = ? AND device_id = ?`, id.String(), deviceID)
+	_, _ = tx.ExecContext(ctx, `DELETE FROM campaign_target_customers WHERE campaign_id = $1`, id.String())
+	_, _ = tx.ExecContext(ctx, `DELETE FROM campaign_target_groups WHERE campaign_id = $1`, id.String())
+	_, _ = tx.ExecContext(ctx, `DELETE FROM campaign_messages WHERE campaign_id = $1`, id.String())
+	_, err = tx.ExecContext(ctx, `DELETE FROM campaigns WHERE id = $1 AND device_id = $2`, id.String(), deviceID)
 	if err != nil {
 		return err
 	}
@@ -703,18 +715,18 @@ func (r *Repository) SetCampaignTargets(ctx context.Context, campaignID uuid.UUI
 	defer tx.Rollback()
 
 	// Clear existing targets
-	_, err = tx.ExecContext(ctx, `DELETE FROM campaign_target_customers WHERE campaign_id = ?`, campaignID.String())
+	_, err = tx.ExecContext(ctx, `DELETE FROM campaign_target_customers WHERE campaign_id = $1`, campaignID.String())
 	if err != nil {
 		return err
 	}
-	_, err = tx.ExecContext(ctx, `DELETE FROM campaign_target_groups WHERE campaign_id = ?`, campaignID.String())
+	_, err = tx.ExecContext(ctx, `DELETE FROM campaign_target_groups WHERE campaign_id = $1`, campaignID.String())
 	if err != nil {
 		return err
 	}
 
 	// Add customer targets
 	if len(customerIDs) > 0 {
-		stmt, err := tx.PrepareContext(ctx, `INSERT INTO campaign_target_customers (campaign_id, customer_id) VALUES (?, ?)`)
+		stmt, err := tx.PrepareContext(ctx, `INSERT INTO campaign_target_customers (campaign_id, customer_id) VALUES ($1, $2)`)
 		if err != nil {
 			return err
 		}
@@ -726,7 +738,7 @@ func (r *Repository) SetCampaignTargets(ctx context.Context, campaignID uuid.UUI
 
 	// Add group targets
 	if len(groupIDs) > 0 {
-		stmt, err := tx.PrepareContext(ctx, `INSERT INTO campaign_target_groups (campaign_id, group_id) VALUES (?, ?)`)
+		stmt, err := tx.PrepareContext(ctx, `INSERT INTO campaign_target_groups (campaign_id, group_id) VALUES ($1, $2)`)
 		if err != nil {
 			return err
 		}
@@ -741,7 +753,7 @@ func (r *Repository) SetCampaignTargets(ctx context.Context, campaignID uuid.UUI
 
 func (r *Repository) GetCampaignTargetIDs(ctx context.Context, campaignID uuid.UUID) (customerIDs, groupIDs []uuid.UUID, err error) {
 	// Get customer IDs
-	rows, err := r.db.QueryContext(ctx, `SELECT customer_id FROM campaign_target_customers WHERE campaign_id = ?`, campaignID.String())
+	rows, err := r.db.QueryContext(ctx, `SELECT customer_id FROM campaign_target_customers WHERE campaign_id = $1`, campaignID.String())
 	if err != nil {
 		return nil, nil, err
 	}
@@ -758,7 +770,7 @@ func (r *Repository) GetCampaignTargetIDs(ctx context.Context, campaignID uuid.U
 	}
 
 	// Get group IDs
-	rows2, err := r.db.QueryContext(ctx, `SELECT group_id FROM campaign_target_groups WHERE campaign_id = ?`, campaignID.String())
+	rows2, err := r.db.QueryContext(ctx, `SELECT group_id FROM campaign_target_groups WHERE campaign_id = $1`, campaignID.String())
 	if err != nil {
 		return customerIDs, nil, err
 	}
@@ -783,11 +795,11 @@ func (r *Repository) GetCampaignTargetCustomers(ctx context.Context, campaignID 
 		SELECT DISTINCT c.id, c.device_id, c.phone, c.full_name, c.country, c.gender, c.birth_year, c.created_at, c.updated_at
 		FROM campaign_customers c
 		WHERE c.id IN (
-			SELECT customer_id FROM campaign_target_customers WHERE campaign_id = ?
+			SELECT customer_id FROM campaign_target_customers WHERE campaign_id = $1
 			UNION
 			SELECT gm.customer_id FROM campaign_group_members gm
 			INNER JOIN campaign_target_groups tg ON gm.group_id = tg.group_id
-			WHERE tg.campaign_id = ?
+			WHERE tg.campaign_id = $2
 		)
 	`, campaignID.String(), campaignID.String())
 	if err != nil {
@@ -817,7 +829,7 @@ func (r *Repository) GetCampaignStats(ctx context.Context, campaignID uuid.UUID)
 			SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending,
 			SUM(CASE WHEN status = 'sent' THEN 1 ELSE 0 END) as sent,
 			SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed
-		FROM campaign_messages WHERE campaign_id = ?
+		FROM campaign_messages WHERE campaign_id = $1
 	`, campaignID.String()).Scan(&stats.TotalMessages, &stats.PendingMessages, &stats.SentMessages, &stats.FailedMessages)
 	if err != nil {
 		return nil, err
@@ -842,7 +854,7 @@ func (r *Repository) EnqueueMessages(ctx context.Context, items []*domainCampaig
 
 	stmt, err := tx.PrepareContext(ctx, `
 		INSERT INTO campaign_messages (id, campaign_id, customer_id, device_id, phone, message, status, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 		ON CONFLICT(campaign_id, customer_id) DO NOTHING
 	`)
 	if err != nil {
@@ -868,9 +880,9 @@ func (r *Repository) GetPendingMessages(ctx context.Context, deviceID string, li
 		SELECT m.id, m.campaign_id, m.customer_id, m.device_id, m.phone, m.message, m.status, m.error, m.sent_at, m.created_at, m.updated_at
 		FROM campaign_messages m
 		INNER JOIN campaigns c ON m.campaign_id = c.id
-		WHERE m.device_id = ? AND m.status = 'pending' AND c.status = 'running'
+		WHERE m.device_id = $1 AND m.status = 'pending' AND c.status = 'running'
 		ORDER BY m.created_at ASC
-		LIMIT ?
+		LIMIT $2
 	`, deviceID, limit)
 	if err != nil {
 		return nil, err
@@ -901,8 +913,8 @@ func (r *Repository) UpdateMessageStatus(ctx context.Context, id uuid.UUID, stat
 		sentAt = &now
 	}
 	_, err := r.db.ExecContext(ctx, `
-		UPDATE campaign_messages SET status = ?, error = ?, sent_at = ?, updated_at = ?
-		WHERE id = ?
+		UPDATE campaign_messages SET status = $1, error = $2, sent_at = $3, updated_at = $4
+		WHERE id = $5
 	`, string(status), errorMsg, sentAt, now, id.String())
 	return err
 }
@@ -910,7 +922,7 @@ func (r *Repository) UpdateMessageStatus(ctx context.Context, id uuid.UUID, stat
 func (r *Repository) IsMessageQueued(ctx context.Context, campaignID, customerID uuid.UUID) (bool, error) {
 	var count int
 	err := r.db.QueryRowContext(ctx, `
-		SELECT COUNT(*) FROM campaign_messages WHERE campaign_id = ? AND customer_id = ?
+		SELECT COUNT(*) FROM campaign_messages WHERE campaign_id = $1 AND customer_id = $2
 	`, campaignID.String(), customerID.String()).Scan(&count)
 	return count > 0, err
 }
@@ -926,7 +938,7 @@ func (r *Repository) CreateShortURL(ctx context.Context, shortURL *domainCampaig
 
 	_, err := r.db.ExecContext(ctx, `
 		INSERT INTO campaign_short_urls (id, device_id, code, original_url, clicks, created_at)
-		VALUES (?, ?, ?, ?, ?, ?)
+		VALUES ($1, $2, $3, $4, $5, $6)
 	`, shortURL.ID.String(), shortURL.DeviceID, shortURL.Code, shortURL.OriginalURL, shortURL.Clicks, shortURL.CreatedAt)
 	return err
 }
@@ -936,7 +948,7 @@ func (r *Repository) GetShortURLByCode(ctx context.Context, code string) (*domai
 	var idStr string
 	err := r.db.QueryRowContext(ctx, `
 		SELECT id, device_id, code, original_url, clicks, created_at
-		FROM campaign_short_urls WHERE code = ?
+		FROM campaign_short_urls WHERE code = $1
 	`, code).Scan(&idStr, &shortURL.DeviceID, &shortURL.Code, &shortURL.OriginalURL, &shortURL.Clicks, &shortURL.CreatedAt)
 	if err == sql.ErrNoRows {
 		return nil, nil
@@ -949,7 +961,7 @@ func (r *Repository) GetShortURLByCode(ctx context.Context, code string) (*domai
 }
 
 func (r *Repository) IncrementShortURLClicks(ctx context.Context, code string) error {
-	_, err := r.db.ExecContext(ctx, `UPDATE campaign_short_urls SET clicks = clicks + 1 WHERE code = ?`, code)
+	_, err := r.db.ExecContext(ctx, `UPDATE campaign_short_urls SET clicks = clicks + 1 WHERE code = $1`, code)
 	return err
 }
 
@@ -962,9 +974,9 @@ func (r *Repository) GetCustomersForValidation(ctx context.Context, deviceID str
 		SELECT id, device_id, phone, full_name, company, country, gender, birth_year, 
 			   phone_valid, whatsapp_exists, created_at, updated_at
 		FROM campaign_customers 
-		WHERE device_id = ? AND (phone_valid = 'pending' OR whatsapp_exists = 'pending')
+		WHERE device_id = $1 AND (phone_valid = 'pending' OR whatsapp_exists = 'pending')
 		ORDER BY created_at ASC
-		LIMIT ?
+		LIMIT $2
 	`, deviceID, limit)
 	if err != nil {
 		return nil, err
@@ -994,8 +1006,8 @@ func (r *Repository) GetCustomersForValidation(ctx context.Context, deviceID str
 func (r *Repository) UpdateCustomerValidation(ctx context.Context, id uuid.UUID, phoneValid, whatsappExists domainCampaign.ValidationStatus) error {
 	now := time.Now()
 	_, err := r.db.ExecContext(ctx, `
-		UPDATE campaign_customers SET phone_valid = ?, whatsapp_exists = ?, updated_at = ?
-		WHERE id = ?
+		UPDATE campaign_customers SET phone_valid = $1, whatsapp_exists = $2, updated_at = $3
+		WHERE id = $4
 	`, string(phoneValid), string(whatsappExists), now, id.String())
 	return err
 }

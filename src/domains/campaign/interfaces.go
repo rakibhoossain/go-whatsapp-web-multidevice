@@ -76,6 +76,7 @@ type ICampaignUsecase interface {
 	UpdateCustomer(ctx context.Context, req UpdateCustomerRequest) (*Customer, error)
 	DeleteCustomer(ctx context.Context, deviceID string, id uuid.UUID) error
 	ValidateCustomer(ctx context.Context, deviceID string, id uuid.UUID) error // Manual validation trigger
+	ValidatePendingCustomers(ctx context.Context, deviceID string) error       // Bulk manual validation trigger
 	StartValidationWorker(ctx context.Context)                                 // Background validation
 
 	// Group management
