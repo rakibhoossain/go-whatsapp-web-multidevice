@@ -12,9 +12,10 @@ type ICampaignRepository interface {
 	CreateCustomer(ctx context.Context, customer *Customer) error
 	GetCustomer(ctx context.Context, deviceID string, id uuid.UUID) (*Customer, error)
 	GetCustomerByPhone(ctx context.Context, deviceID string, phone string) (*Customer, error)
-	ListCustomers(ctx context.Context, deviceID string, limit, offset int) ([]*Customer, int, error)
+	ListCustomers(ctx context.Context, deviceID string, limit, offset int, search string) ([]*Customer, int, error)
 	UpdateCustomer(ctx context.Context, customer *Customer) error
 	DeleteCustomer(ctx context.Context, deviceID string, id uuid.UUID) error
+	DeleteCustomers(ctx context.Context, deviceID string, ids []uuid.UUID) error
 	BulkCreateCustomers(ctx context.Context, customers []*Customer) (int, error)
 	GetCustomersForValidation(ctx context.Context, deviceID string, limit int) ([]*Customer, error)
 	UpdateCustomerValidation(ctx context.Context, id uuid.UUID, phoneValid, whatsappExists ValidationStatus) error
@@ -72,9 +73,10 @@ type ICampaignUsecase interface {
 	CreateCustomer(ctx context.Context, req CreateCustomerRequest) (*Customer, error)
 	ImportCustomersFromCSV(ctx context.Context, deviceID string, csvData []byte) (imported int, errors []string, err error)
 	GetCustomer(ctx context.Context, deviceID string, id uuid.UUID) (*Customer, error)
-	ListCustomers(ctx context.Context, deviceID string, page, pageSize int) (*CustomerListResponse, error)
+	ListCustomers(ctx context.Context, deviceID string, page, pageSize int, search string) (*CustomerListResponse, error)
 	UpdateCustomer(ctx context.Context, req UpdateCustomerRequest) (*Customer, error)
 	DeleteCustomer(ctx context.Context, deviceID string, id uuid.UUID) error
+	DeleteCustomers(ctx context.Context, deviceID string, ids []uuid.UUID) error
 	ValidateCustomer(ctx context.Context, deviceID string, id uuid.UUID) error // Manual validation trigger
 	ValidatePendingCustomers(ctx context.Context, deviceID string) error       // Bulk manual validation trigger
 	StartValidationWorker(ctx context.Context)                                 // Background validation

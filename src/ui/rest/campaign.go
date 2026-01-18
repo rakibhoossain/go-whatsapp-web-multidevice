@@ -1,6 +1,7 @@
 package rest
 
 import (
+	"fmt"
 	"io"
 	"strconv"
 
@@ -30,6 +31,7 @@ func InitRestCampaign(app fiber.Router, service domainCampaign.ICampaignUsecase)
 	campaign.Get("/customers/:id", rest.GetCustomer)
 	campaign.Put("/customers/:id", rest.UpdateCustomer)
 	campaign.Delete("/customers/:id", rest.DeleteCustomer)
+	campaign.Post("/customers/bulk-delete", rest.DeleteCustomers)
 	campaign.Post("/customers/:id/validate", rest.ValidateCustomer)
 	campaign.Post("/customers/validate-pending", rest.ValidatePendingCustomers)
 
@@ -101,13 +103,47 @@ func (h *Campaign) ListCustomers(c *fiber.Ctx) error {
 
 	page, _ := strconv.Atoi(c.Query("page", "1"))
 	pageSize, _ := strconv.Atoi(c.Query("page_size", "20"))
+	search := c.Query("search", "")
 
-	result, err := h.Service.ListCustomers(c.UserContext(), deviceID, page, pageSize)
+	result, err := h.Service.ListCustomers(c.UserContext(), deviceID, page, pageSize, search)
 	if err != nil {
 		return c.Status(500).JSON(utils.ResponseData{Status: 500, Code: "ERROR", Message: err.Error()})
 	}
 
 	return c.JSON(utils.ResponseData{Status: 200, Code: "SUCCESS", Message: "Customers retrieved", Results: result})
+}
+
+func (h *Campaign) DeleteCustomers(c *fiber.Ctx) error {
+	deviceID, err := h.checkDeviceConnected(c)
+	if err != nil {
+		return err
+	}
+
+	var req struct {
+		IDs []string `json:"ids"`
+	}
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(400).JSON(utils.ResponseData{Status: 400, Code: "ERROR", Message: "Invalid request body"})
+	}
+
+	if len(req.IDs) == 0 {
+		return c.Status(400).JSON(utils.ResponseData{Status: 400, Code: "ERROR", Message: "No IDs provided"})
+	}
+
+	var uuids []uuid.UUID
+	for _, idStr := range req.IDs {
+		id, err := uuid.Parse(idStr)
+		if err != nil {
+			return c.Status(400).JSON(utils.ResponseData{Status: 400, Code: "ERROR", Message: fmt.Sprintf("Invalid ID: %s", idStr)})
+		}
+		uuids = append(uuids, id)
+	}
+
+	if err := h.Service.DeleteCustomers(c.UserContext(), deviceID, uuids); err != nil {
+		return c.Status(500).JSON(utils.ResponseData{Status: 500, Code: "ERROR", Message: err.Error()})
+	}
+
+	return c.JSON(utils.ResponseData{Status: 200, Code: "SUCCESS", Message: "Customers deleted"})
 }
 
 func (h *Campaign) CreateCustomer(c *fiber.Ctx) error {

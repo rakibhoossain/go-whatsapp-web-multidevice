@@ -233,21 +233,32 @@ func (r *Repository) GetCustomerByPhone(ctx context.Context, deviceID string, ph
 	return customer, nil
 }
 
-func (r *Repository) ListCustomers(ctx context.Context, deviceID string, limit, offset int) ([]*domainCampaign.Customer, int, error) {
+func (r *Repository) ListCustomers(ctx context.Context, deviceID string, limit, offset int, search string) ([]*domainCampaign.Customer, int, error) {
+	// Build query
+	countQuery := `SELECT COUNT(*) FROM campaign_customers WHERE device_id = $1`
+	selectQuery := `SELECT id, device_id, phone, full_name, company, country, gender, birth_year, phone_valid, whatsapp_exists, created_at, updated_at
+		FROM campaign_customers WHERE device_id = $1`
+
+	args := []interface{}{deviceID}
+	if search != "" {
+		// PostgreSQL ILIKE for case-insensitive search
+		likeQuery := " AND (phone ILIKE $2 OR full_name ILIKE $2)"
+		countQuery += likeQuery
+		selectQuery += likeQuery
+		args = append(args, "%"+search+"%")
+	}
+
+	selectQuery += ` ORDER BY created_at DESC LIMIT $` + fmt.Sprintf("%d", len(args)+1) + ` OFFSET $` + fmt.Sprintf("%d", len(args)+2)
+
 	// Get total count
 	var total int
-	err := r.db.QueryRowContext(ctx, `
-		SELECT COUNT(*) FROM campaign_customers WHERE device_id = $1
-	`, deviceID).Scan(&total)
-	if err != nil {
+	if err := r.db.QueryRowContext(ctx, countQuery, args...).Scan(&total); err != nil {
 		return nil, 0, err
 	}
 
 	// Get customers
-	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, device_id, phone, full_name, company, country, gender, birth_year, phone_valid, whatsapp_exists, created_at, updated_at
-		FROM campaign_customers WHERE device_id = $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3
-	`, deviceID, limit, offset)
+	args = append(args, limit, offset)
+	rows, err := r.db.QueryContext(ctx, selectQuery, args...)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -287,6 +298,32 @@ func (r *Repository) UpdateCustomer(ctx context.Context, customer *domainCampaig
 
 func (r *Repository) DeleteCustomer(ctx context.Context, deviceID string, id uuid.UUID) error {
 	_, err := r.db.ExecContext(ctx, `DELETE FROM campaign_customers WHERE id = $1 AND device_id = $2`, id.String(), deviceID)
+	return err
+}
+
+func (r *Repository) DeleteCustomers(ctx context.Context, deviceID string, ids []uuid.UUID) error {
+	if len(ids) == 0 {
+		return nil
+	}
+
+	// Convert UUIDs to string array for Postgres ANY
+	// Create string slice
+	idStrings := make([]string, len(ids))
+	for i, id := range ids {
+		idStrings[i] = id.String()
+	}
+
+	// Construct placeholder for IN clause: $2, $3, ...
+	placeholders := make([]string, len(ids))
+	args := make([]interface{}, len(ids)+1)
+	args[0] = deviceID
+	for i, _ := range ids {
+		placeholders[i] = fmt.Sprintf("$%d", i+2)
+		args[i+1] = idStrings[i]
+	}
+
+	query := fmt.Sprintf("DELETE FROM campaign_customers WHERE device_id = $1 AND id IN (%s)", strings.Join(placeholders, ","))
+	_, err := r.db.ExecContext(ctx, query, args...)
 	return err
 }
 

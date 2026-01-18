@@ -16,7 +16,21 @@ export default {
                 birth_year: ''
             },
             editingId: null,
-            importErrors: []
+            importErrors: [],
+            searchQuery: '',
+            selectedIds: [],
+            searchTimeout: null
+        }
+    },
+    watch: {
+        searchQuery() {
+            if (this.searchTimeout) {
+                clearTimeout(this.searchTimeout);
+            }
+            this.searchTimeout = setTimeout(() => {
+                this.page = 1; // Reset to page 1 on search
+                this.loadCustomers();
+            }, 500);
         }
     },
     computed: {
@@ -32,7 +46,8 @@ export default {
         async loadCustomers() {
             try {
                 this.loading = true;
-                const response = await window.http.get(`/campaign/customers?page=${this.page}&page_size=${this.pageSize}`);
+                this.selectedIds = []; // Clear selection on reload
+                const response = await window.http.get(`/campaign/customers?page=${this.page}&page_size=${this.pageSize}&search=${encodeURIComponent(this.searchQuery)}`);
                 this.customers = response.data.results.customers || [];
                 this.total = response.data.results.total;
             } catch (error) {
@@ -40,6 +55,32 @@ export default {
             } finally {
                 this.loading = false;
             }
+        },
+        async deleteSelectedCustomers() {
+            if (this.selectedIds.length === 0) return;
+            if (!confirm(`Are you sure you want to delete ${this.selectedIds.length} customers?`)) return;
+
+            try {
+                this.loading = true;
+                await window.http.post('/campaign/customers/bulk-delete', { ids: this.selectedIds });
+                showSuccessInfo('Customers deleted');
+                this.selectedIds = [];
+                await this.loadCustomers();
+            } catch (error) {
+                showErrorInfo(error.response?.data?.message || error.message);
+            } finally {
+                this.loading = false;
+            }
+        },
+        toggleSelectAll() {
+            if (this.selectedIds.length === this.customers.length) {
+                this.selectedIds = [];
+            } else {
+                this.selectedIds = this.customers.map(c => c.id);
+            }
+        },
+        isAllSelected() {
+            return this.customers.length > 0 && this.selectedIds.length === this.customers.length;
         },
         // initDataTable removed as it is now integrated into loadCustomers
         openCreateModal() {
@@ -227,16 +268,24 @@ export default {
         <div class="header">
             <i class="users icon"></i> Campaign Customers
             <div class="ui buttons right floated" style="margin-left: 10px">
-                <button class="ui orange button" @click.stop="validatePendingCustomers">
+                <button class="ui red button" v-if="selectedIds.length > 0" @click.stop="deleteSelectedCustomers" style="margin-right: 5px">
+                    <i class="trash icon"></i> Delete ({{ selectedIds.length }})
+                </button>
+                <button class="ui orange button" @click.stop="validatePendingCustomers" style="margin-right: 5px">
                     <i class="sync icon"></i> Check Again
                 </button>
-                <div class="or"></div>
-                <button class="ui green button" @click.stop="openCreateModal">
+                <button class="ui green button" @click.stop="openCreateModal" style="margin-right: 5px">
                     <i class="plus icon"></i> Add
                 </button>
                 <button class="ui blue button" @click.stop="openImportModal">
                     <i class="upload icon"></i> Import CSV
                 </button>
+            </div>
+            <div style="padding-top: 0.8em !important;">
+                <div class="ui fluid mini icon input" style="width: 200px;">
+                    <input type="text" placeholder="Search..." v-model="searchQuery" @keyup.enter="loadCustomers">
+                    <i class="search link icon" @click="loadCustomers"></i>
+                </div>
             </div>
         </div>
         <div class="scrolling content">
@@ -246,6 +295,12 @@ export default {
             <table class="ui celled striped table" id="campaign_customers_table">
                 <thead>
                     <tr>
+                        <th class="collapsing">
+                            <div class="ui checkbox">
+                                <input type="checkbox" :checked="isAllSelected()" @change="toggleSelectAll">
+                                <label></label>
+                            </div>
+                        </th>
                         <th>Phone</th>
                         <th>Name</th>
                         <th>Company</th>
@@ -255,6 +310,12 @@ export default {
                 </thead>
                 <tbody>
                     <tr v-for="customer in customers" :key="customer.id">
+                        <td>
+                            <div class="ui checkbox">
+                                <input type="checkbox" :value="customer.id" v-model="selectedIds">
+                                <label></label>
+                            </div>
+                        </td>
                         <td>{{ customer.phone }}</td>
                         <td>{{ customer.full_name || '-' }}</td>
                         <td>{{ customer.company || '-' }}</td>
@@ -269,10 +330,10 @@ export default {
                         </td>
                         <td>
                             <div class="ui mini buttons">
-                                <button class="ui teal button" @click.stop="validateCustomer(customer.id)" title="Validate">
+                                <button class="ui teal button" @click.stop="validateCustomer(customer.id)" title="Validate" style="margin-right: 2px;">
                                     <i class="check icon"></i>
                                 </button>
-                                <button class="ui yellow button" @click.stop="openEditModal(customer)" title="Edit">
+                                <button class="ui yellow button" @click.stop="openEditModal(customer)" title="Edit" style="margin-right: 2px;">
                                     <i class="edit icon"></i>
                                 </button>
                                 <button class="ui red button" @click.stop="deleteCustomer(customer.id)" title="Delete">

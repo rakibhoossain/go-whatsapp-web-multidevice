@@ -208,7 +208,7 @@ func (s *CampaignService) GetCustomer(ctx context.Context, deviceID string, id u
 	return s.repo.GetCustomer(ctx, deviceID, id)
 }
 
-func (s *CampaignService) ListCustomers(ctx context.Context, deviceID string, page, pageSize int) (*domainCampaign.CustomerListResponse, error) {
+func (s *CampaignService) ListCustomers(ctx context.Context, deviceID string, page, pageSize int, search string) (*domainCampaign.CustomerListResponse, error) {
 	if page < 1 {
 		page = 1
 	}
@@ -217,7 +217,7 @@ func (s *CampaignService) ListCustomers(ctx context.Context, deviceID string, pa
 	}
 
 	offset := (page - 1) * pageSize
-	customers, total, err := s.repo.ListCustomers(ctx, deviceID, pageSize, offset)
+	customers, total, err := s.repo.ListCustomers(ctx, deviceID, pageSize, offset, search)
 	if err != nil {
 		return nil, err
 	}
@@ -270,6 +270,10 @@ func (s *CampaignService) UpdateCustomer(ctx context.Context, req domainCampaign
 
 func (s *CampaignService) DeleteCustomer(ctx context.Context, deviceID string, id uuid.UUID) error {
 	return s.repo.DeleteCustomer(ctx, deviceID, id)
+}
+
+func (s *CampaignService) DeleteCustomers(ctx context.Context, deviceID string, ids []uuid.UUID) error {
+	return s.repo.DeleteCustomers(ctx, deviceID, ids)
 }
 
 // ============================================================================
