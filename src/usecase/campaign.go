@@ -105,7 +105,7 @@ func (s *CampaignService) CreateCustomer(ctx context.Context, req domainCampaign
 	return customer, nil
 }
 
-func (s *CampaignService) ImportCustomersFromCSV(ctx context.Context, deviceID string, csvData []byte) (imported int, errorsOut []string, err error) {
+func (s *CampaignService) ImportCustomersFromCSV(ctx context.Context, deviceID string, csvData []byte, groupID *uuid.UUID) (imported int, errorsOut []string, err error) {
 	reader := csv.NewReader(bytes.NewReader(csvData))
 
 	// Read header
@@ -208,9 +208,33 @@ func (s *CampaignService) ImportCustomersFromCSV(ctx context.Context, deviceID s
 	}
 
 	imported, err = s.repo.BulkCreateCustomers(ctx, customers)
+	if err != nil {
+		return imported, errorsOut, err
+	}
+
+	// If groupID is provided, we need to add these customers to the group.
+	if groupID != nil {
+		// Identify IDs of imported/existing customers
+		var idsToAdd []uuid.UUID
+		for _, c := range customers {
+			// fetching one by one is safe for small batches.
+			// BulkCreateCustomers ensures they exist.
+			existing, err := s.repo.GetCustomerByPhone(ctx, deviceID, c.Phone)
+			if err == nil && existing != nil {
+				idsToAdd = append(idsToAdd, existing.ID)
+			}
+		}
+
+		if len(idsToAdd) > 0 {
+			// Add to group (using AddCustomersToGroup which handles duplicates)
+			if err := s.repo.AddCustomersToGroup(ctx, *groupID, idsToAdd); err != nil {
+				errorsOut = append(errorsOut, fmt.Sprintf("Customers imported but failed to add %d customers to group: %v", len(idsToAdd), err))
+			}
+		}
+	}
 
 	// Trigger validation in background if import successful
-	if err == nil && imported > 0 {
+	if imported > 0 {
 		go func() {
 			if err := s.ValidatePendingCustomers(context.Background(), deviceID); err != nil {
 				logrus.Errorf("Campaign: Failed to auto-validate imported customers: %v", err)
@@ -218,7 +242,7 @@ func (s *CampaignService) ImportCustomersFromCSV(ctx context.Context, deviceID s
 		}()
 	}
 
-	return imported, errorsOut, err
+	return imported, errorsOut, nil
 }
 
 func (s *CampaignService) GetCustomer(ctx context.Context, deviceID string, id uuid.UUID) (*domainCampaign.Customer, error) {

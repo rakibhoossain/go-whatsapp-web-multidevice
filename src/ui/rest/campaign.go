@@ -198,7 +198,15 @@ func (h *Campaign) ImportCustomers(c *fiber.Ctx) error {
 		return c.Status(400).JSON(utils.ResponseData{Status: 400, Code: "ERROR", Message: "Failed to read file"})
 	}
 
-	imported, errors, err := h.Service.ImportCustomersFromCSV(c.UserContext(), deviceID, data)
+	groupIDStr := c.FormValue("group_id")
+	var groupID *uuid.UUID
+	if groupIDStr != "" {
+		if id, err := uuid.Parse(groupIDStr); err == nil {
+			groupID = &id
+		}
+	}
+
+	imported, errors, err := h.Service.ImportCustomersFromCSV(c.UserContext(), deviceID, data, groupID)
 	if err != nil {
 		return c.Status(400).JSON(utils.ResponseData{Status: 400, Code: "ERROR", Message: err.Error()})
 	}

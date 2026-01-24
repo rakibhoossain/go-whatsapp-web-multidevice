@@ -72,7 +72,7 @@ type ICampaignRepository interface {
 type ICampaignUsecase interface {
 	// Customer management
 	CreateCustomer(ctx context.Context, req CreateCustomerRequest) (*Customer, error)
-	ImportCustomersFromCSV(ctx context.Context, deviceID string, csvData []byte) (imported int, errors []string, err error)
+	ImportCustomersFromCSV(ctx context.Context, deviceID string, csvData []byte, groupID *uuid.UUID) (imported int, errors []string, err error)
 	GetCustomer(ctx context.Context, deviceID string, id uuid.UUID) (*Customer, error)
 	ListCustomers(ctx context.Context, deviceID string, page, pageSize int, search string, filterGroupID *uuid.UUID, filterType string) (*CustomerListResponse, error)
 	UpdateCustomer(ctx context.Context, req UpdateCustomerRequest) (*Customer, error)

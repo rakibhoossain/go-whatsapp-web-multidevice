@@ -178,6 +178,45 @@ export default {
                 this.bulkLoading = false;
             }
         },
+        triggerCSVImport() {
+            this.$refs.csvInput.click();
+        },
+        async handleCSVUpload(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            // Reset input so same file can be selected again if needed
+            event.target.value = '';
+
+            if (!confirm(`Import customers from ${file.name} to this group?`)) return;
+
+            const formData = new FormData();
+            formData.append('file', file);
+            formData.append('group_id', this.selectedGroup.id);
+
+            try {
+                this.bulkLoading = true;
+                const response = await window.http.post('/campaign/customers/import', formData, {
+                    headers: { 'Content-Type': 'multipart/form-data' }
+                });
+
+                const result = response.data.results;
+                showSuccessInfo(`Imported: ${result.imported}, Errors: ${result.errors?.length || 0}`);
+
+                if (result.errors && result.errors.length > 0) {
+                    console.warn('Import errors:', result.errors);
+                    showErrorInfo(`Completed with errors. Check console.`);
+                }
+
+                // Reload list
+                await this.loadCustomers(true);
+                await this.refreshGroupData();
+            } catch (error) {
+                showErrorInfo(error.response?.data?.message || error.message);
+            } finally {
+                this.bulkLoading = false;
+            }
+        },
         async refreshGroupData() {
             const response = await window.http.get(`/campaign/groups/${this.selectedGroup.id}`);
             const groupData = response.data.results;
@@ -443,6 +482,10 @@ export default {
         <i class="close icon"></i>
         <div class="header">
             <i class="users icon"></i> Manage Members - {{ selectedGroup?.name }}
+            <button class="ui mini teal right floated button" @click="triggerCSVImport" :class="{loading: bulkLoading}">
+                <i class="upload icon"></i> Import CSV
+            </button>
+            <input type="file" ref="csvInput" style="display: none" accept=".csv" @change="handleCSVUpload">
         </div>
         <div class="scrolling content">
             <div class="ui info message">
